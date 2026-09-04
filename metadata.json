@@ -1,0 +1,6 @@
+{
+  "name": "Sndmart Vendor",
+  "description": "Hotel and food vendor management app for Sndmart store owners to manage orders, menus, earnings, reviews, and store profile.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

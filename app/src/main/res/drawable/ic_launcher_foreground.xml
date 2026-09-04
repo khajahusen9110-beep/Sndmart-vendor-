@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Centered Storefront + Cloche Food Icon within 66dp safe zone (21 to 87) -->
+    <!-- Cloche handle -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,34a4,4 0 1,0 0,-8a4,4 0 0,0 0,8z" />
+    <!-- Cloche dome -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M33,56c0,-11.6 9.4,-21 21,-21s21,9.4 21,21H33z" />
+    <!-- Cloche tray base -->
+    <path
+        android:fillColor="#FFF3E0"
+        android:pathData="M30,59c0,-1.1 0.9,-2 2,-2h44c1.1,0 2,0.9 2,2s-0.9,2 -2,2H32C30.9,61 30,60.1 30,59z" />
+    <!-- Storefront awning / vendor badge base -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M34,66h40v12c0,2.2 -1.8,4 -4,4H38c-2.2,0 -4,-1.8 -4,-4V66z" />
+    <!-- Storefront door/window cutout -->
+    <path
+        android:fillColor="#E65100"
+        android:pathData="M49,70h10v12H49z" />
+    <path
+        android:fillColor="#E65100"
+        android:pathData="M38,70h8v5h-8z" />
+    <path
+        android:fillColor="#E65100"
+        android:pathData="M62,70h8v5h-8z" />
+</vector>
