@@ -26,6 +26,19 @@ jobs:
         run: |
           echo '${{ secrets.GOOGLE_SERVICES_JSON }}' > app/google-services.json
 
+      # Naya release keystore generate karne ka step
+      - name: Generate Production Keystore
+        run: |
+          keytool -genkeypair -v \
+            -keystore app/release.keystore \
+            -alias releaseKey \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -storepass MyStorePass123 \
+            -keypass MyStorePass123 \
+            -dname "CN=AppOwner, OU=Mobile, O=App, L=City, S=State, C=IN"
+
       - name: Build APK
         run: gradle assembleRelease
 
@@ -43,4 +56,11 @@ jobs:
         with:
           name: app-release-aab
           path: app/build/outputs/bundle/release/*.aab
+
+      # Keystore ko download ke liye save karna
+      - name: Backup Keystore
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-keystore
+          path: app/release.keystore
           
