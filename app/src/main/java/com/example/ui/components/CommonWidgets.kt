@@ -32,6 +32,7 @@ fun StatusBadge(
         "confirmed" -> Triple(Slate100, Slate700, "CONFIRMED")
         "preparing" -> Triple(SpruceContainerLight, SprucePrimary, "PREPARING")
         "ready" -> Triple(PolishPurpleLight, PolishPurple, "READY")
+        "out_for_delivery" -> Triple(PolishAmberLight, PolishAmberDark, "OUT FOR DELIVERY")
         "delivered", "paid", "approved", "active" -> Triple(PolishEmeraldLight, PolishEmeraldDark, status.uppercase())
         "cancelled", "canceled", "rejected", "failed" -> Triple(PolishRoseLight, PolishRose, status.uppercase())
         "open" -> Triple(PolishEmeraldLight, PolishEmeraldDark, "OPEN")

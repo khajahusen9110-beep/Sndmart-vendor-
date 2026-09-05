@@ -97,6 +97,7 @@ data class Vendor(
     @Json(name = "city_id") val cityId: String? = null,
     @Json(name = "food_license_url") val foodLicenseUrl: String? = null,
     @Json(name = "aadhar_document_url") val aadharDocumentUrl: String? = null,
+    @Json(name = "is_featured") val isFeatured: Boolean? = false,
     @Json(name = "created_at") val createdAt: String? = null
 )
 
@@ -105,7 +106,13 @@ data class Category(
     val id: String = "",
     @Json(name = "vendor_id") val vendorId: String = "",
     val name: String = "",
+    @Json(name = "name_kn") val nameKn: String? = null,
+    val slug: String? = null,
     @Json(name = "image_url") val imageUrl: String = "",
+    @Json(name = "sort_order") val sortOrder: Int? = 0,
+    @Json(name = "is_active") val isActive: Boolean = true,
+    @Json(name = "vendor_type") val vendorType: String? = "hotel",
+    @Json(name = "city_id") val cityId: String? = null,
     @Json(name = "created_at") val createdAt: String? = null
 )
 
@@ -115,8 +122,16 @@ data class Product(
     @Json(name = "vendor_id") val vendorId: String = "",
     @Json(name = "category_id") val categoryId: String? = null,
     val name: String = "",
+    @Json(name = "name_kn") val nameKn: String? = null,
     val description: String? = null,
     val price: Double = 0.0,
+    val mrp: Double? = null,
+    val unit: String? = "piece",
+    @Json(name = "stock_qty") val stockQty: Int? = null,
+    @Json(name = "stock_quantity") val stockQuantity: Int? = null,
+    @Json(name = "low_stock_threshold") val lowStockThreshold: Int? = null,
+    @Json(name = "is_available") val isAvailable: Boolean = true,
+    @Json(name = "is_featured") val isFeatured: Boolean = false,
     @Json(name = "image_url") val imageUrl: String? = null,
     @Json(name = "is_active") val isActive: Boolean = true,
     @Json(name = "available_from") val availableFrom: String? = null,
@@ -128,15 +143,31 @@ data class Product(
 data class Order(
     val id: String = "",
     @Json(name = "order_number") val orderNumber: String? = null,
+    @Json(name = "customer_id") val customerId: String? = null,
     @Json(name = "vendor_id") val vendorId: String = "",
+    @Json(name = "delivery_partner_id") val deliveryPartnerId: String? = null,
+    @Json(name = "address_id") val addressId: String? = null,
+    @Json(name = "slot_id") val slotId: String? = null,
     @Json(name = "customer_name") val customerName: String? = null,
     @Json(name = "customer_phone") val customerPhone: String? = null,
     @Json(name = "delivery_address") val deliveryAddress: String? = null,
-    val status: String = "pending", // 'pending', 'confirmed', 'preparing', 'ready', 'delivered', 'cancelled'
+    val status: String = "pending", // 'pending', 'confirmed', 'preparing', 'ready', 'out_for_delivery', 'delivered', 'cancelled', 'rejected'
+    val subtotal: Double? = null,
+    @Json(name = "discount_amount") val discountAmount: Double? = null,
+    @Json(name = "delivery_fee") val deliveryFee: Double? = null,
+    @Json(name = "handling_fee") val handlingFee: Double? = null,
     @Json(name = "total_amount") val totalAmount: Double = 0.0,
+    @Json(name = "commission_amount") val commissionAmount: Double? = null,
+    @Json(name = "vendor_amount") val vendorAmount: Double? = null,
+    val notes: String? = null,
     @Json(name = "payment_status") val paymentStatus: String? = null,
     @Json(name = "payment_method") val paymentMethod: String? = null,
     @Json(name = "cancellation_reason") val cancellationReason: String? = null,
+    @Json(name = "placed_at") val placedAt: String? = null,
+    @Json(name = "confirmed_at") val confirmedAt: String? = null,
+    @Json(name = "delivered_at") val deliveredAt: String? = null,
+    @Json(name = "cancelled_at") val cancelledAt: String? = null,
+    @Json(name = "city_id") val cityId: String? = null,
     @Json(name = "created_at") val createdAt: String? = null,
     @Json(name = "order_items") val orderItems: List<OrderItem>? = null
 )
@@ -146,7 +177,9 @@ data class OrderItem(
     val id: String = "",
     @Json(name = "order_id") val orderId: String = "",
     @Json(name = "product_id") val productId: String? = null,
+    @Json(name = "vendor_id") val vendorId: String? = null,
     @Json(name = "product_name") val productName: String? = null,
+    @Json(name = "variant_label") val variantLabel: String? = null,
     val name: String? = null,
     val quantity: Int = 1,
     @Json(name = "unit_price") val unitPrice: Double = 0.0,
@@ -169,7 +202,8 @@ data class OrderStatusHistory(
 data class WalletTransaction(
     val id: String = "",
     @Json(name = "vendor_id") val vendorId: String = "",
-    val type: String = "credit", // 'credit', 'debit', 'order_earning', 'withdrawal_payout', etc.
+    @Json(name = "order_id") val orderId: String? = null,
+    val type: String = "credit", // 'credit', 'debit'
     val amount: Double = 0.0,
     val description: String? = null,
     @Json(name = "created_at") val createdAt: String? = null
@@ -195,7 +229,11 @@ data class Withdrawal(
     val amount: Double = 0.0,
     val status: String = "pending", // 'pending', 'approved', 'paid', 'rejected'
     val note: String? = null,
-    @Json(name = "created_at") val createdAt: String? = null
+    @Json(name = "commission_amount") val commissionAmount: Double? = null,
+    @Json(name = "net_payable_amount") val netPayableAmount: Double? = null,
+    @Json(name = "paid_at") val paidAt: String? = null,
+    @Json(name = "created_at") val createdAt: String? = null,
+    @Json(name = "updated_at") val updatedAt: String? = null
 )
 
 @JsonClass(generateAdapter = true)
@@ -232,5 +270,6 @@ data class FcmTokenRegistration(
     @Json(name = "vendor_email") val vendorEmail: String,
     @Json(name = "fcm_token") val fcmToken: String,
     val platform: String = "android",
-    @Json(name = "is_active") val isActive: Boolean = true
+    @Json(name = "is_active") val isActive: Boolean = true,
+    @Json(name = "firebase_project") val firebaseProject: String = "native_vendor"
 )

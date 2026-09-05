@@ -346,6 +346,15 @@ class VendorRepository(
     ): Resource<Order> = withContext(Dispatchers.IO) {
         try {
             val orderUpdates = mutableMapOf<String, Any?>("status" to newStatus)
+            val nowIso = getCurrentIsoDate()
+            when (newStatus.lowercase()) {
+                "confirmed" -> orderUpdates["confirmed_at"] = nowIso
+                "delivered" -> orderUpdates["delivered_at"] = nowIso
+                "cancelled", "rejected" -> orderUpdates["cancelled_at"] = nowIso
+            }
+            if (!notes.isNullOrEmpty()) {
+                orderUpdates["notes"] = notes
+            }
             if (!cancellationReason.isNullOrEmpty()) {
                 orderUpdates["cancellation_reason"] = cancellationReason
             }
@@ -359,7 +368,7 @@ class VendorRepository(
                             "order_id" to orderId,
                             "status" to newStatus,
                             "notes" to (notes ?: cancellationReason ?: "Status changed to $newStatus"),
-                            "created_at" to getCurrentIsoDate()
+                            "created_at" to nowIso
                         )
                     )
                 } catch (_: Exception) {
@@ -572,7 +581,8 @@ class VendorRepository(
                 "vendor_email" to email,
                 "fcm_token" to token,
                 "platform" to "android",
-                "is_active" to true
+                "is_active" to true,
+                "firebase_project" to "native_vendor"
             )
             val response = api.registerFcmToken(onConflict = "vendor_id", token = body)
             if (response.isSuccessful) {

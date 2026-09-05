@@ -35,8 +35,10 @@ val ORDER_STATUS_FILTERS = listOf(
     "CONFIRMED" to "Confirmed",
     "PREPARING" to "Preparing",
     "READY" to "Ready",
+    "OUT_FOR_DELIVERY" to "Out for Delivery",
     "DELIVERED" to "Delivered",
-    "CANCELLED" to "Cancelled"
+    "CANCELLED" to "Cancelled",
+    "REJECTED" to "Rejected"
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
