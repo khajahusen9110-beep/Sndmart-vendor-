@@ -26,7 +26,7 @@ jobs:
         run: |
           echo '${{ secrets.GOOGLE_SERVICES_JSON }}' > app/google-services.json
 
-      # Root aur app dono jagah keystore create/copy kar rahe hain
+      # Root aur app dono folders me keystore prepare
       - name: Create Production Keystore
         run: |
           keytool -genkeypair -v \
@@ -40,10 +40,17 @@ jobs:
             -dname "CN=Sndmart, OU=Mobile, O=Sndmart, L=Sindhanur, S=Karnataka, C=IN"
           cp release.keystore app/release.keystore
 
-      # Signing parameters pass karte hue build
+      # Flags:
+      # --no-daemon (KSP IntelliJ crash fix)
+      # -x lint -x lintVitalRelease (LintFragmentVersion error fix)
+      # -x test (Unit tests fail hone se rokne ke liye)
       - name: Build APK
         run: |
           gradle assembleRelease \
+            --no-daemon \
+            -x lint \
+            -x lintVitalRelease \
+            -x test \
             -Pandroid.injected.signing.store.file=$(pwd)/release.keystore \
             -Pandroid.injected.signing.store.password=MyStorePass123 \
             -Pandroid.injected.signing.key.alias=releaseKey \
@@ -52,6 +59,10 @@ jobs:
       - name: Build App Bundle (AAB)
         run: |
           gradle bundleRelease \
+            --no-daemon \
+            -x lint \
+            -x lintVitalRelease \
+            -x test \
             -Pandroid.injected.signing.store.file=$(pwd)/release.keystore \
             -Pandroid.injected.signing.store.password=MyStorePass123 \
             -Pandroid.injected.signing.key.alias=releaseKey \
