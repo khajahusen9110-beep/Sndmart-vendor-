@@ -26,24 +26,36 @@ jobs:
         run: |
           echo '${{ secrets.GOOGLE_SERVICES_JSON }}' > app/google-services.json
 
-      # Naya release keystore generate karne ka step
-      - name: Generate Production Keystore
+      # Root aur app dono jagah keystore create/copy kar rahe hain
+      - name: Create Production Keystore
         run: |
           keytool -genkeypair -v \
-            -keystore app/release.keystore \
+            -keystore release.keystore \
             -alias releaseKey \
             -keyalg RSA \
             -keysize 2048 \
             -validity 10000 \
             -storepass MyStorePass123 \
             -keypass MyStorePass123 \
-            -dname "CN=AppOwner, OU=Mobile, O=App, L=City, S=State, C=IN"
+            -dname "CN=Sndmart, OU=Mobile, O=Sndmart, L=Sindhanur, S=Karnataka, C=IN"
+          cp release.keystore app/release.keystore
 
+      # Signing parameters pass karte hue build
       - name: Build APK
-        run: gradle assembleRelease
+        run: |
+          gradle assembleRelease \
+            -Pandroid.injected.signing.store.file=$(pwd)/release.keystore \
+            -Pandroid.injected.signing.store.password=MyStorePass123 \
+            -Pandroid.injected.signing.key.alias=releaseKey \
+            -Pandroid.injected.signing.key.password=MyStorePass123
 
       - name: Build App Bundle (AAB)
-        run: gradle bundleRelease
+        run: |
+          gradle bundleRelease \
+            -Pandroid.injected.signing.store.file=$(pwd)/release.keystore \
+            -Pandroid.injected.signing.store.password=MyStorePass123 \
+            -Pandroid.injected.signing.key.alias=releaseKey \
+            -Pandroid.injected.signing.key.password=MyStorePass123
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
@@ -57,10 +69,9 @@ jobs:
           name: app-release-aab
           path: app/build/outputs/bundle/release/*.aab
 
-      # Keystore ko download ke liye save karna
-      - name: Backup Keystore
+      - name: Backup Keystore File
         uses: actions/upload-artifact@v4
         with:
           name: production-keystore
-          path: app/release.keystore
+          path: release.keystore
           
