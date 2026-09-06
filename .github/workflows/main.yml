@@ -26,7 +26,27 @@ jobs:
         run: |
           echo '${{ secrets.GOOGLE_SERVICES_JSON }}' > app/google-services.json
 
-      # Root aur app dono folders me keystore prepare
+      # Vite .env aur Android properties dono jagah Supabase keys write karna
+      - name: Inject Supabase Environment Variables
+        run: |
+          # 1. Root .env file (Vite ke liye)
+          cat << 'EOF' > .env
+          VITE_SUPABASE_URL=${{ secrets.SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY }}
+          SUPABASE_URL=${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY }}
+          EOF
+
+          # 2. Agar frontend kisi subfolder me ho to wahan bhi copy
+          cp .env app/ || true
+
+          # 3. Android Gradle properties
+          echo "SUPABASE_URL=${{ secrets.SUPABASE_URL }}" >> local.properties
+          echo "SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY }}" >> local.properties
+          echo "supabaseUrl=${{ secrets.SUPABASE_URL }}" >> gradle.properties
+          echo "supabaseKey=${{ secrets.SUPABASE_ANON_KEY }}" >> gradle.properties
+
+      # Production Keystore Generate karna
       - name: Create Production Keystore
         run: |
           keytool -genkeypair -v \
@@ -40,11 +60,13 @@ jobs:
             -dname "CN=Sndmart, OU=Mobile, O=Sndmart, L=Sindhanur, S=Karnataka, C=IN"
           cp release.keystore app/release.keystore
 
-      # Flags:
-      # --no-daemon (KSP IntelliJ crash fix)
-      # -x lint -x lintVitalRelease (LintFragmentVersion error fix)
-      # -x test (Unit tests fail hone se rokne ke liye)
+      # Build APK
       - name: Build APK
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: |
           gradle assembleRelease \
             --no-daemon \
@@ -56,7 +78,13 @@ jobs:
             -Pandroid.injected.signing.key.alias=releaseKey \
             -Pandroid.injected.signing.key.password=MyStorePass123
 
+      # Build App Bundle (AAB)
       - name: Build App Bundle (AAB)
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: |
           gradle bundleRelease \
             --no-daemon \
