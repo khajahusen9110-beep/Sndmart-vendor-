@@ -23,11 +23,19 @@ interface SupabaseApi {
         @Body request: VerifyOtpRequest
     ): Response<AuthResponse>
 
+    @POST("auth/v1/token?grant_type=refresh_token")
+    suspend fun refreshToken(
+        @Body request: Map<String, String>
+    ): Response<AuthResponse>
+
+    @GET("auth/v1/user")
+    suspend fun getAuthUser(): Response<AuthUser>
+
     // 1.1 Cities table - matching exact query: .from('cities').select('id, name').eq('status', 'active').order('name')
     @GET("rest/v1/cities")
     suspend fun getCities(
         @Query("select") select: String = "id,name",
-        @Query("status") statusFilter: String = "eq.active",
+        @Query("status") statusFilter: String? = "eq.active",
         @Query("order") order: String = "name.asc"
     ): Response<List<City>>
 
@@ -35,6 +43,7 @@ interface SupabaseApi {
     @POST("rest/v1/profiles")
     @Headers("Prefer: return=representation,resolution=merge-duplicates")
     suspend fun insertProfile(
+        @Query("on_conflict") onConflict: String = "id",
         @Body profile: Map<String, @JvmSuppressWildcards Any?>
     ): Response<List<Map<String, Any>>>
 
@@ -88,8 +97,10 @@ interface SupabaseApi {
     @GET("rest/v1/products")
     suspend fun getProducts(
         @Query("vendor_id") vendorIdFilter: String,
-        @Query("select") select: String = "*",
-        @Query("order") order: String = "created_at.desc"
+        @Query("select") select: String = "id,vendor_id,category_id,name,description,price,image_url,is_active,stock_qty,is_available,created_at",
+        @Query("order") order: String = "created_at.desc",
+        @Query("limit") limit: Int? = 30,
+        @Query("offset") offset: Int? = 0
     ): Response<List<Product>>
 
     @POST("rest/v1/products")
@@ -110,18 +121,21 @@ interface SupabaseApi {
         @Query("id") productIdFilter: String
     ): Response<Unit>
 
-    // 5. Orders table (with nested order_items)
+    // 5. Orders table (with nested order_items and joined customer profile)
     @GET("rest/v1/orders")
     suspend fun getOrders(
         @Query("vendor_id") vendorIdFilter: String,
-        @Query("select") select: String = "*,order_items(*)",
-        @Query("order") order: String = "created_at.desc"
+        @Query("status") statusFilter: String = "in.(confirmed,preparing,ready,out_for_delivery,delivered,cancelled,rejected)",
+        @Query("select") select: String = "id,order_number,status,subtotal,discount_amount,delivery_fee,handling_fee,total_amount,commission_amount,vendor_amount,notes,payment_status,payment_method,delivery_address,created_at,order_items(id,product_name,quantity,unit_price,total_price),customer:profiles!orders_customer_id_fkey(full_name,phone)",
+        @Query("order") order: String = "created_at.desc",
+        @Query("limit") limit: Int? = 20,
+        @Query("offset") offset: Int? = 0
     ): Response<List<Order>>
 
     @GET("rest/v1/orders")
     suspend fun getOrderById(
         @Query("id") idFilter: String,
-        @Query("select") select: String = "*,order_items(*)"
+        @Query("select") select: String = "*,order_items(*),customer:profiles!orders_customer_id_fkey(full_name,phone)"
     ): Response<List<Order>>
 
     @PATCH("rest/v1/orders")
@@ -142,24 +156,30 @@ interface SupabaseApi {
     @GET("rest/v1/vendor_wallet_transactions")
     suspend fun getWalletTransactions(
         @Query("vendor_id") vendorIdFilter: String,
-        @Query("select") select: String = "*",
-        @Query("order") order: String = "created_at.desc"
+        @Query("select") select: String = "id,vendor_id,amount,type,description,reference_id,created_at",
+        @Query("order") order: String = "created_at.desc",
+        @Query("limit") limit: Int? = 20,
+        @Query("offset") offset: Int? = 0
     ): Response<List<WalletTransaction>>
 
     // 8. Payouts
     @GET("rest/v1/vendor_payouts")
     suspend fun getPayouts(
         @Query("vendor_id") vendorIdFilter: String,
-        @Query("select") select: String = "*",
-        @Query("order") order: String = "created_at.desc"
+        @Query("select") select: String = "id,vendor_id,amount,status,reference_number,notes,created_at",
+        @Query("order") order: String = "created_at.desc",
+        @Query("limit") limit: Int? = 20,
+        @Query("offset") offset: Int? = 0
     ): Response<List<Payout>>
 
     // 9. Withdrawals
     @GET("rest/v1/vendor_withdrawals")
     suspend fun getWithdrawals(
         @Query("vendor_id") vendorIdFilter: String,
-        @Query("select") select: String = "*",
-        @Query("order") order: String = "created_at.desc"
+        @Query("select") select: String = "id,vendor_id,city_id,amount,status,admin_notes,vendor_note,created_at",
+        @Query("order") order: String = "created_at.desc",
+        @Query("limit") limit: Int? = 20,
+        @Query("offset") offset: Int? = 0
     ): Response<List<Withdrawal>>
 
     @POST("rest/v1/vendor_withdrawals")
@@ -172,8 +192,10 @@ interface SupabaseApi {
     @GET("rest/v1/vendor_reviews")
     suspend fun getReviews(
         @Query("vendor_id") vendorIdFilter: String,
-        @Query("select") select: String = "*",
-        @Query("order") order: String = "created_at.desc"
+        @Query("select") select: String = "id,vendor_id,order_id,customer_name,rating,comment,created_at",
+        @Query("order") order: String = "created_at.desc",
+        @Query("limit") limit: Int? = 20,
+        @Query("offset") offset: Int? = 0
     ): Response<List<Review>>
 
     // 11. Operating Hours
@@ -230,14 +252,16 @@ interface SupabaseApi {
         @Path(value = "bucket", encoded = true) bucket: String,
         @Path(value = "path", encoded = true) path: String,
         @Body fileBytes: RequestBody,
-        @Header("Content-Type") contentType: String = "image/jpeg"
+        @Header("Content-Type") contentType: String = "image/jpeg",
+        @Header("x-upsert") upsert: String = "true"
     ): Response<StorageUploadResponse>
 
     @POST("storage/v1/object/vendor-kyc-documents/{path}")
     suspend fun uploadKycDocument(
         @Path(value = "path", encoded = true) path: String,
         @Body fileBytes: RequestBody,
-        @Header("Content-Type") contentType: String = "image/jpeg"
+        @Header("Content-Type") contentType: String = "image/jpeg",
+        @Header("x-upsert") upsert: String = "true"
     ): Response<StorageUploadResponse>
 
     @POST("storage/v1/object/sign/vendor-kyc-documents/{path}")
@@ -245,4 +269,17 @@ interface SupabaseApi {
         @Path(value = "path", encoded = true) path: String,
         @Body request: SignedUrlRequest
     ): Response<SignedUrlResponse>
+
+    // 14. App Versions & Maintenance Mode
+    @GET("rest/v1/app_versions")
+    suspend fun getAppVersions(
+        @Query("platform") platformFilter: String = "eq.vendor_app",
+        @Query("select") select: String = "*"
+    ): Response<List<AppVersionInfo>>
+
+    @GET("rest/v1/app_settings")
+    suspend fun getAppSettings(
+        @Query("key") keyFilter: String = "eq.maintenance_mode",
+        @Query("select") select: String = "key,value"
+    ): Response<List<AppSettingItem>>
 }

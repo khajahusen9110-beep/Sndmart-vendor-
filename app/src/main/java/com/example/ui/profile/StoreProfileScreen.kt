@@ -23,12 +23,17 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import android.widget.Toast
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.data.model.OperatingHour
 import com.example.data.model.Vendor
 import com.example.ui.components.ConfirmationDialog
+import com.example.ui.components.GoogleMapLocationPicker
+import com.example.ui.menu.ImageUploadDropzone
+import com.example.ui.menu.SelectedImageFile
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.ProfileUiState
 
@@ -36,7 +41,8 @@ import com.example.ui.viewmodel.ProfileUiState
 @Composable
 fun StoreProfileScreen(
     state: ProfileUiState,
-    onSaveProfile: (name: String, ownerName: String?, phone: String?, address: String?, lat: Double?, lng: Double?, openTime: String?, closeTime: String?, bannerUrl: String?, onComplete: (Boolean, String?) -> Unit) -> Unit,
+    onSaveProfile: (name: String, ownerName: String?, phone: String?, address: String?, lat: Double?, lng: Double?, openTime: String?, closeTime: String?, bannerUrl: String?, cityId: String?, onComplete: (Boolean, String?) -> Unit) -> Unit,
+    onUploadBanner: (fileName: String, fileBytes: ByteArray, mimeType: String, onComplete: (Boolean, String?, String?) -> Unit) -> Unit,
     onAddOperatingHour: (startTime: String, endTime: String, isActive: Boolean, isClosed: Boolean, dayOfWeek: String?, onComplete: (Boolean, String?) -> Unit) -> Unit,
     onUpdateOperatingHour: (id: String, startTime: String, endTime: String, isActive: Boolean, isClosed: Boolean, dayOfWeek: String?, onComplete: (Boolean, String?) -> Unit) -> Unit,
     onToggleOperatingHourActive: (OperatingHour) -> Unit,
@@ -45,11 +51,17 @@ fun StoreProfileScreen(
     onTestSoundAlert: () -> Unit,
     onSimulateFullScreenAlert: () -> Unit = {},
     onRegisterCustomFcmToken: (String, (Boolean, String?) -> Unit) -> Unit,
+    onRefreshProfile: () -> Unit = {},
     onLogout: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     val vendor = state.vendor ?: Vendor()
+
+    LaunchedEffect(Unit) {
+        onRefreshProfile()
+    }
 
     var name by remember(vendor) { mutableStateOf(vendor.name) }
     var ownerName by remember(vendor) { mutableStateOf(vendor.ownerName ?: "") }
@@ -60,6 +72,13 @@ fun StoreProfileScreen(
     var openingTime by remember(vendor) { mutableStateOf(vendor.openingTime ?: "09:00") }
     var closingTime by remember(vendor) { mutableStateOf(vendor.closingTime ?: "23:00") }
     var bannerUrl by remember(vendor) { mutableStateOf(vendor.bannerUrl ?: "") }
+    var cityId by remember(vendor) { mutableStateOf(vendor.cityId ?: "") }
+    var selectedBannerPhoto by remember { mutableStateOf<SelectedImageFile?>(null) }
+    var isUploadingBanner by remember { mutableStateOf(false) }
+    var bannerUploadError by remember { mutableStateOf<String?>(null) }
+
+    var saveErrorFeedback by remember { mutableStateOf<String?>(null) }
+    var saveSuccessFeedback by remember { mutableStateOf<String?>(null) }
 
     var showLogoutConfirmation by remember { mutableStateOf(false) }
     var showAddSlotDialog by remember { mutableStateOf(false) }
@@ -96,7 +115,79 @@ fun StoreProfileScreen(
             contentPadding = PaddingValues(vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // 1. Banner Preview / Selector
+            // Top Status / Error Banner
+            val currentErrorMessage = saveErrorFeedback ?: state.errorMessage
+            val currentSuccessMessage = saveSuccessFeedback ?: state.successMessage
+
+            if (!currentErrorMessage.isNullOrBlank()) {
+                item {
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = PolishRoseLight,
+                        border = BorderStroke(1.dp, PolishRose.copy(alpha = 0.4f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(14.dp),
+                            verticalAlignment = Alignment.Top,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ErrorOutline,
+                                contentDescription = null,
+                                tint = PolishRose,
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Store Profile Update Failed",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = PolishRoseDark
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = currentErrorMessage,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = PolishRoseDark,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
+                    }
+                }
+            } else if (!currentSuccessMessage.isNullOrBlank()) {
+                item {
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = PolishEmeraldLight,
+                        border = BorderStroke(1.dp, PolishEmeraldDark.copy(alpha = 0.35f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.CheckCircle,
+                                contentDescription = null,
+                                tint = PolishEmeraldDark,
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Text(
+                                text = currentSuccessMessage,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = PolishEmeraldDark,
+                                fontWeight = FontWeight.Medium,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+                }
+            }
+
+            // 1. Storefront Cover Banner Photo
             item {
                 Surface(
                     shape = RoundedCornerShape(20.dp),
@@ -104,63 +195,58 @@ fun StoreProfileScreen(
                     border = BorderStroke(1.dp, PolishBorderLight),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Column {
-                        if (bannerUrl.isNotBlank()) {
-                            AsyncImage(
-                                model = bannerUrl,
-                                contentDescription = "Store Banner",
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(140.dp)
-                                    .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
-                            )
-                        } else {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(110.dp)
-                                    .background(SndmartOrange.copy(alpha = 0.12f)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Icon(
-                                        imageVector = Icons.Default.Storefront,
-                                        contentDescription = null,
-                                        tint = SndmartOrange,
-                                        modifier = Modifier.size(42.dp)
-                                    )
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Text(
-                                        text = "Storefront Cover Banner",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = Slate500
-                                    )
-                                }
-                            }
-                        }
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(18.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Text(
+                            text = "Storefront Cover Banner",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = Slate900
+                        )
+                        Text(
+                            text = "This photo appears at the top of your restaurant store page in the customer app.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Slate500
+                        )
 
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Text(
-                                text = "Store Banner Image URL",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.SemiBold,
-                                color = Slate900
-                            )
-                            OutlinedTextField(
-                                value = bannerUrl,
-                                onValueChange = { bannerUrl = it },
-                                placeholder = { Text("https://images.unsplash.com/photo-...") },
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(12.dp)
-                            )
-                        }
+                        ImageUploadDropzone(
+                            label = "Store Banner",
+                            isRequired = false,
+                            selectedImage = selectedBannerPhoto,
+                            existingImageUrl = bannerUrl.ifBlank { null },
+                            isUploading = isUploadingBanner,
+                            uploadProgressText = "Uploading store banner...",
+                            errorMessage = bannerUploadError,
+                            onImageSelected = { file ->
+                                selectedBannerPhoto = file
+                                bannerUploadError = null
+                                isUploadingBanner = true
+                                val fileExt = file.extension.ifBlank { "jpg" }
+                                val fileName = "banner-${System.currentTimeMillis()}.$fileExt"
+                                onUploadBanner(fileName, file.bytes, file.mimeType) { success, uploadedUrl, err ->
+                                    isUploadingBanner = false
+                                    if (success && uploadedUrl != null) {
+                                        bannerUrl = uploadedUrl
+                                        selectedBannerPhoto = null
+                                        bannerUploadError = null
+                                    } else {
+                                        bannerUploadError = err ?: "Banner upload failed. Please try again."
+                                    }
+                                }
+                            },
+                            onImageRemoved = {
+                                selectedBannerPhoto = null
+                                bannerUrl = ""
+                                bannerUploadError = null
+                            },
+                            onError = { err ->
+                                bannerUploadError = err
+                            }
+                        )
                     }
                 }
             }
@@ -238,42 +324,40 @@ fun StoreProfileScreen(
                             fontWeight = FontWeight.Bold,
                             color = Slate900
                         )
+                        Text(
+                            text = "Position the pin on Google Maps. Dropping the pin automatically records your store coordinates and pre-fills your address.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Slate500
+                        )
+
+                        val parsedLat = latitudeStr.toDoubleOrNull() ?: 19.0760
+                        val parsedLng = longitudeStr.toDoubleOrNull() ?: 72.8777
+
+                        GoogleMapLocationPicker(
+                            initialLatitude = parsedLat,
+                            initialLongitude = parsedLng,
+                            initialAddress = address,
+                            onLocationSelected = { lat, lng, reverseGeocodedAddress ->
+                                latitudeStr = lat.toString()
+                                longitudeStr = lng.toString()
+                                if (reverseGeocodedAddress.isNotBlank()) {
+                                    address = reverseGeocodedAddress
+                                }
+                            }
+                        )
 
                         OutlinedTextField(
                             value = address,
                             onValueChange = { address = it },
-                            label = { Text("Full Address") },
+                            label = { Text("Full Address (Editable)") },
                             placeholder = { Text("Shop/Plot No, Area, Landmark, City") },
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(12.dp),
-                            maxLines = 3
+                            maxLines = 3,
+                            supportingText = {
+                                Text("Pre-filled by reverse-geocoding. Edit to add shop number, floor, or landmark.")
+                            }
                         )
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            OutlinedTextField(
-                                value = latitudeStr,
-                                onValueChange = { latitudeStr = it },
-                                label = { Text("Latitude") },
-                                placeholder = { Text("17.3850") },
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                                singleLine = true,
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(12.dp)
-                            )
-                            OutlinedTextField(
-                                value = longitudeStr,
-                                onValueChange = { longitudeStr = it },
-                                label = { Text("Longitude") },
-                                placeholder = { Text("78.4867") },
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                                singleLine = true,
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(12.dp)
-                            )
-                        }
                     }
                 }
             }
@@ -550,7 +634,7 @@ fun StoreProfileScreen(
                                         color = Slate900
                                     )
                                     Text(
-                                        text = if (state.isSoundAlertEnabled) "Plays tone and vibrates on pending orders" else "Sound alerts are muted",
+                                        text = if (state.isSoundAlertEnabled) "Plays tone and vibrates on new confirmed orders" else "Sound alerts are muted",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = Slate500
                                     )
@@ -709,13 +793,19 @@ fun StoreProfileScreen(
                                 style = MaterialTheme.typography.bodySmall
                             )
                         }
-                        if (!vendor.cityId.isNullOrBlank()) {
+                        val displayCityId = cityId.ifBlank { vendor.cityId ?: "" }
+                        if (displayCityId.isNotBlank()) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 Text("Assigned City ID:", style = MaterialTheme.typography.bodySmall, color = Slate500)
-                                Text(vendor.cityId, style = MaterialTheme.typography.bodySmall, color = Slate900)
+                                Text(
+                                    text = displayCityId,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Slate900
+                                )
                             }
                         }
                     }
@@ -724,34 +814,97 @@ fun StoreProfileScreen(
 
             // 7. Save Profile Changes Button
             item {
-                Button(
-                    onClick = {
-                        val lat = latitudeStr.toDoubleOrNull()
-                        val lng = longitudeStr.toDoubleOrNull()
-                        onSaveProfile(
-                            name.trim(),
-                            ownerName.ifBlank { null },
-                            phone.ifBlank { null },
-                            address.ifBlank { null },
-                            lat,
-                            lng,
-                            openingTime.ifBlank { null },
-                            closingTime.ifBlank { null },
-                            bannerUrl.ifBlank { null }
-                        ) { _, _ -> }
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(52.dp),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = SprucePrimary)
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    if (state.isSaving) {
-                        CircularProgressIndicator(color = Color.White, modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                    } else {
-                        Icon(imageVector = Icons.Default.Save, contentDescription = null)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("SAVE STORE CHANGES", fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp)
+                    val currentErrorMessage = saveErrorFeedback ?: state.errorMessage
+                    if (!currentErrorMessage.isNullOrBlank()) {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = PolishRoseLight,
+                            border = BorderStroke(1.dp, PolishRose.copy(alpha = 0.4f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.Top,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.ErrorOutline,
+                                    contentDescription = null,
+                                    tint = PolishRose,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Update Failed",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = PolishRoseDark
+                                    )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = currentErrorMessage,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = PolishRoseDark,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    Button(
+                        onClick = {
+                            if (isUploadingBanner) return@Button
+                            val lat = latitudeStr.toDoubleOrNull()
+                            val lng = longitudeStr.toDoubleOrNull()
+                            val targetCityId = cityId.ifBlank { vendor.cityId ?: "" }
+
+                            saveErrorFeedback = null
+                            saveSuccessFeedback = null
+
+                            onSaveProfile(
+                                name.trim(),
+                                ownerName.ifBlank { null },
+                                phone.ifBlank { null },
+                                address.ifBlank { null },
+                                lat,
+                                lng,
+                                openingTime.ifBlank { null },
+                                closingTime.ifBlank { null },
+                                bannerUrl.ifBlank { null },
+                                targetCityId.ifBlank { null }
+                            ) { success, err ->
+                                if (success) {
+                                    saveErrorFeedback = null
+                                    saveSuccessFeedback = "Store profile updated successfully"
+                                    Toast.makeText(context, "Store profile updated successfully", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    saveErrorFeedback = err ?: "Failed to save store profile"
+                                    saveSuccessFeedback = null
+                                    Toast.makeText(context, err ?: "Failed to save store profile", Toast.LENGTH_LONG).show()
+                                }
+                            }
+                        },
+                        enabled = !state.isSaving && !isUploadingBanner,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = SprucePrimary)
+                    ) {
+                        if (state.isSaving || isUploadingBanner) {
+                            CircularProgressIndicator(color = Color.White, modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(if (isUploadingBanner) "UPLOADING BANNER..." else "SAVING CHANGES...", fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp)
+                        } else {
+                            Icon(imageVector = Icons.Default.Save, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("SAVE STORE CHANGES", fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp)
+                        }
                     }
                 }
             }
@@ -785,9 +938,15 @@ fun StoreProfileScreen(
             existingSlots = state.operatingHours,
             currentSlotId = null,
             onDismiss = { showAddSlotDialog = false },
-            onConfirm = { start, end, active, isClosed, day ->
-                onAddOperatingHour(start, end, active, isClosed, day) { _, _ -> }
-                showAddSlotDialog = false
+            onConfirm = { start, end, active, isClosed, day, onDone ->
+                onAddOperatingHour(start, end, active, isClosed, day) { success, err ->
+                    onDone(success, err)
+                    if (success) {
+                        Toast.makeText(context, "Operating hour slot added", Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(context, err ?: "Failed to add operating hour", Toast.LENGTH_LONG).show()
+                    }
+                }
             }
         )
     }
@@ -803,9 +962,15 @@ fun StoreProfileScreen(
             existingSlots = state.operatingHours,
             currentSlotId = slot.id,
             onDismiss = { slotToEdit = null },
-            onConfirm = { start, end, active, isClosed, day ->
-                onUpdateOperatingHour(slot.id, start, end, active, isClosed, day) { _, _ -> }
-                slotToEdit = null
+            onConfirm = { start, end, active, isClosed, day, onDone ->
+                onUpdateOperatingHour(slot.id, start, end, active, isClosed, day) { success, err ->
+                    onDone(success, err)
+                    if (success) {
+                        Toast.makeText(context, "Operating hour slot updated", Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(context, err ?: "Failed to update operating hour", Toast.LENGTH_LONG).show()
+                    }
+                }
             }
         )
     }
@@ -818,7 +983,13 @@ fun StoreProfileScreen(
             confirmText = "Delete Slot",
             isDestructive = true,
             onConfirm = {
-                onDeleteOperatingHour(slot.id) { _, _ -> }
+                onDeleteOperatingHour(slot.id) { success, err ->
+                    if (success) {
+                        Toast.makeText(context, "Operating hour slot removed", Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(context, err ?: "Failed to delete operating hour", Toast.LENGTH_LONG).show()
+                    }
+                }
                 slotToDelete = null
             },
             onDismiss = { slotToDelete = null }
@@ -851,12 +1022,14 @@ private fun OperatingHourSlotDialog(
     existingSlots: List<OperatingHour>,
     currentSlotId: String?,
     onDismiss: () -> Unit,
-    onConfirm: (start: String, end: String, isActive: Boolean, isClosed: Boolean, dayOfWeek: String?) -> Unit
+    onConfirm: (start: String, end: String, isActive: Boolean, isClosed: Boolean, dayOfWeek: String?, onDone: (Boolean, String?) -> Unit) -> Unit
 ) {
     var slotStart by remember { mutableStateOf(initialStart) }
     var slotEnd by remember { mutableStateOf(initialEnd) }
     var dayOfWeek by remember { mutableStateOf(initialDayOfWeek) }
     var isActive by remember { mutableStateOf(initialIsActive) }
+    var isSubmitting by remember { mutableStateOf(false) }
+    var slotError by remember { mutableStateOf<String?>(null) }
 
     val presetSlots = listOf(
         Triple("Breakfast", "07:00", "11:00"),
@@ -874,10 +1047,45 @@ private fun OperatingHourSlotDialog(
     }
 
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (!isSubmitting) onDismiss() },
         title = { Text(title, fontWeight = FontWeight.Bold) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (!slotError.isNullOrBlank()) {
+                    Surface(
+                        color = PolishRoseLight,
+                        shape = RoundedCornerShape(8.dp),
+                        border = BorderStroke(1.dp, PolishRose.copy(alpha = 0.5f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(10.dp),
+                            verticalAlignment = Alignment.Top,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ErrorOutline,
+                                contentDescription = null,
+                                tint = PolishRose,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Column {
+                                Text(
+                                    text = "Failed to save operating hour",
+                                    color = PolishRoseDark,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = slotError ?: "",
+                                    color = PolishRoseDark,
+                                    fontSize = 11.sp
+                                )
+                            }
+                        }
+                    }
+                }
+
                 // Preset Chips
                 Text("Quick Meal Presets:", style = MaterialTheme.typography.labelMedium, color = Slate500)
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -897,7 +1105,10 @@ private fun OperatingHourSlotDialog(
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     OutlinedTextField(
                         value = slotStart,
-                        onValueChange = { slotStart = it },
+                        onValueChange = {
+                            slotStart = it
+                            slotError = null
+                        },
                         label = { Text("Start Time") },
                         placeholder = { Text("08:00") },
                         modifier = Modifier.weight(1f),
@@ -906,7 +1117,10 @@ private fun OperatingHourSlotDialog(
                     )
                     OutlinedTextField(
                         value = slotEnd,
-                        onValueChange = { slotEnd = it },
+                        onValueChange = {
+                            slotEnd = it
+                            slotError = null
+                        },
                         label = { Text("End Time") },
                         placeholder = { Text("12:00") },
                         modifier = Modifier.weight(1f),
@@ -964,16 +1178,38 @@ private fun OperatingHourSlotDialog(
         confirmButton = {
             Button(
                 onClick = {
-                    onConfirm(slotStart.trim(), slotEnd.trim(), isActive, false, dayOfWeek.trim().ifBlank { null })
+                    isSubmitting = true
+                    slotError = null
+                    onConfirm(slotStart.trim(), slotEnd.trim(), isActive, false, dayOfWeek.trim().ifBlank { null }) { success, err ->
+                        isSubmitting = false
+                        if (success) {
+                            onDismiss()
+                        } else {
+                            slotError = err ?: "Failed to save operating hour slot"
+                        }
+                    }
                 },
-                enabled = slotStart.isNotBlank() && slotEnd.isNotBlank(),
+                enabled = !isSubmitting && slotStart.isNotBlank() && slotEnd.isNotBlank(),
                 colors = ButtonDefaults.buttonColors(containerColor = SprucePrimary)
             ) {
-                Text("Save Slot")
+                if (isSubmitting) {
+                    CircularProgressIndicator(
+                        color = Color.White,
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Saving...")
+                } else {
+                    Text("Save Slot")
+                }
             }
         },
         dismissButton = {
-            OutlinedButton(onClick = onDismiss) {
+            OutlinedButton(
+                onClick = onDismiss,
+                enabled = !isSubmitting
+            ) {
                 Text("Cancel")
             }
         }

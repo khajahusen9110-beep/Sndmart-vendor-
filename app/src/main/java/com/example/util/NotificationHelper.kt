@@ -104,8 +104,8 @@ object NotificationHelper {
             ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
 
         val formattedAmount = "₹${String.format(java.util.Locale.US, "%.2f", totalAmount)}"
-        val titleText = "🛎️ NEW ORDER #$orderNumber • $formattedAmount"
-        val bodyText = "$customerName • $itemsCount item(s) • Tap to accept or review"
+        val titleText = "🛎️ NEW ORDER TO PREPARE #$orderNumber • $formattedAmount"
+        val bodyText = "$customerName • $itemsCount item(s) • Tap to start preparing"
 
         val builder = NotificationCompat.Builder(context, CHANNEL_ID_INCOMING_ORDERS)
             .setSmallIcon(R.mipmap.ic_launcher)
@@ -126,7 +126,7 @@ object NotificationHelper {
             .setOngoing(true)
             .addAction(
                 android.R.drawable.ic_input_add,
-                "ACCEPT ORDER",
+                "START PREPARING",
                 fullScreenPendingIntent
             )
 

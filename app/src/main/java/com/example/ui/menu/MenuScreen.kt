@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -28,11 +29,13 @@ import coil.compose.AsyncImage
 import com.example.data.model.Category
 import com.example.data.model.Product
 import com.example.ui.components.ConfirmationDialog
+import com.example.ui.components.ProductCardSkeleton
 import com.example.ui.theme.SndmartGreen
 import com.example.ui.theme.SndmartOrange
 import com.example.ui.theme.polishTextFieldColors
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.MenuUiState
+import kotlinx.coroutines.delay
 
 enum class MenuSectionTab(val title: String) {
     ITEMS("Menu Items"),
@@ -59,17 +62,31 @@ fun MenuScreen(
     onAddCategory: (name: String, imageUrl: String, onComplete: (Boolean, String?) -> Unit) -> Unit,
     onUpdateCategory: (id: String, name: String, imageUrl: String, onComplete: (Boolean, String?) -> Unit) -> Unit,
     onDeleteCategory: (id: String, onComplete: (Boolean, String?) -> Unit) -> Unit,
-    onAddProduct: (categoryId: String?, name: String, description: String?, price: Double, imageUrl: String?, isActive: Boolean, availableFrom: String?, availableUntil: String?, onComplete: (Boolean, String?) -> Unit) -> Unit,
+    onAddProduct: (categoryId: String?, name: String, description: String?, price: Double, imageUrl: String?, isActive: Boolean, availableFrom: String?, availableUntil: String?, stockQty: Int, isAvailable: Boolean, onComplete: (Boolean, String?) -> Unit) -> Unit,
     onUpdateProduct: (productId: String, updates: Map<String, Any?>, onComplete: (Boolean, String?) -> Unit) -> Unit,
     onToggleProductActive: (Product) -> Unit,
     onDeleteProduct: (productId: String, onComplete: (Boolean, String?) -> Unit) -> Unit,
     onUploadCategoryImage: (fileName: String, fileBytes: ByteArray, mimeType: String, onComplete: (Boolean, String?, String?) -> Unit) -> Unit = { _, _, _, cb -> cb(false, null, "Not configured") },
     onUploadProductImage: (fileName: String, fileBytes: ByteArray, mimeType: String, onComplete: (Boolean, String?, String?) -> Unit) -> Unit = { _, _, _, cb -> cb(false, null, "Not configured") },
+    onQuickRestockItem: ((productId: String, targetStock: Int) -> Unit)? = null,
+    onRestockAllZeroStock: ((targetStock: Int) -> Unit)? = null,
     onRefresh: () -> Unit,
+    onLoadMore: () -> Unit = {},
+    onSearchQueryChange: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var activeSubTab by remember { mutableStateOf(MenuSectionTab.ITEMS) }
     var selectedCategoryFilter by remember { mutableStateOf<String?>(null) }
+    var filterSoldOutOnly by remember { mutableStateOf(false) }
+    var localSearchText by remember { mutableStateOf(state.searchQuery) }
+
+    // Rule 5: Debounce search inputs by 400ms
+    LaunchedEffect(localSearchText) {
+        if (localSearchText != state.searchQuery) {
+            delay(400)
+            onSearchQueryChange(localSearchText)
+        }
+    }
 
     // Dialog states
     var showAddCategoryDialog by remember { mutableStateOf(false) }
@@ -80,9 +97,39 @@ fun MenuScreen(
     var editingProduct by remember { mutableStateOf<Product?>(null) }
     var productToDelete by remember { mutableStateOf<Product?>(null) }
 
-    val filteredProducts = remember(state.products, selectedCategoryFilter) {
-        if (selectedCategoryFilter == null) state.products
+    val zeroStockProducts = remember(state.products) {
+        state.products.filter { it.isSoldOut }
+    }
+
+    val filteredProducts = remember(state.products, selectedCategoryFilter, filterSoldOutOnly, state.searchQuery) {
+        var list = if (selectedCategoryFilter == null) state.products
         else state.products.filter { it.categoryId == selectedCategoryFilter }
+        if (filterSoldOutOnly) {
+            list = list.filter { it.isSoldOut }
+        }
+        if (state.searchQuery.isNotBlank()) {
+            val q = state.searchQuery.trim().lowercase()
+            list = list.filter {
+                it.name.lowercase().contains(q) ||
+                (it.description?.lowercase()?.contains(q) == true)
+            }
+        }
+        list
+    }
+
+    val itemsListState = rememberLazyListState()
+    val shouldLoadMoreProducts = remember {
+        derivedStateOf {
+            val totalItems = itemsListState.layoutInfo.totalItemsCount
+            val lastVisible = itemsListState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+            totalItems > 0 && lastVisible >= totalItems - 2
+        }
+    }
+
+    LaunchedEffect(shouldLoadMoreProducts.value) {
+        if (shouldLoadMoreProducts.value && state.canLoadMore && !state.isLoadingMore && !state.isLoading) {
+            onLoadMore()
+        }
     }
 
     Column(
@@ -110,9 +157,68 @@ fun MenuScreen(
             }
         }
 
+        if (state.errorMessage != null) {
+            Surface(
+                color = MaterialTheme.colorScheme.errorContainer,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ErrorOutline,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Text(
+                        text = state.errorMessage,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+        }
+
+        if (state.successMessage != null) {
+            Surface(
+                color = Color(0xFFE8F5E9),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.CheckCircle,
+                        contentDescription = null,
+                        tint = Color(0xFF2E7D32),
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Text(
+                        text = state.successMessage,
+                        color = Color(0xFF1B5E20),
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+        }
+
         when (activeSubTab) {
             MenuSectionTab.ITEMS -> {
                 LazyColumn(
+                    state = itemsListState,
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(horizontal = 16.dp),
@@ -128,7 +234,7 @@ fun MenuScreen(
                         ) {
                             Column {
                                 Text(
-                                    text = "${state.products.size} Items on Menu",
+                                    text = if (state.errorMessage != null && state.products.isEmpty()) "Menu Catalog" else "${state.products.size} Items on Menu",
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Bold
                                 )
@@ -151,8 +257,102 @@ fun MenuScreen(
                         }
                     }
 
+                    // Rule 5: Debounced search text field for products
+                    item {
+                        OutlinedTextField(
+                            value = localSearchText,
+                            onValueChange = { localSearchText = it },
+                            placeholder = { Text("Search menu items...", fontSize = 13.sp) },
+                            leadingIcon = {
+                                Icon(imageVector = Icons.Default.Search, contentDescription = null, tint = Slate400, modifier = Modifier.size(18.dp))
+                            },
+                            trailingIcon = {
+                                if (localSearchText.isNotEmpty()) {
+                                    IconButton(onClick = { localSearchText = "" }) {
+                                        Icon(imageVector = Icons.Default.Close, contentDescription = "Clear", tint = Slate400, modifier = Modifier.size(16.dp))
+                                    }
+                                }
+                            },
+                            singleLine = true,
+                            shape = RoundedCornerShape(12.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = SndmartOrange,
+                                unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+                                focusedContainerColor = MaterialTheme.colorScheme.surface,
+                                unfocusedContainerColor = MaterialTheme.colorScheme.surface
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+
+                    // Zero Stock Alert Banner
+                    if (zeroStockProducts.isNotEmpty()) {
+                        item {
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF3E0)),
+                                border = BorderStroke(1.dp, Color(0xFFFFB74D))
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(14.dp),
+                                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.Top,
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.WarningAmber,
+                                            contentDescription = null,
+                                            tint = Color(0xFFE65100),
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = "${zeroStockProducts.size} item(s) showing Sold Out (Stock is 0)",
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 14.sp,
+                                                color = Color(0xFFBF360C)
+                                            )
+                                            Text(
+                                                text = "Customer app marks items with 0 stock as unavailable. Quick restock below or edit stock to make them orderable.",
+                                                fontSize = 12.sp,
+                                                color = Color(0xFF5D4037)
+                                            )
+                                        }
+                                    }
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Button(
+                                            onClick = { onRestockAllZeroStock?.invoke(100) },
+                                            shape = RoundedCornerShape(8.dp),
+                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE65100)),
+                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            Icon(imageVector = Icons.Default.Bolt, contentDescription = null, modifier = Modifier.size(16.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("Quick Restock All (100)", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                        OutlinedButton(
+                                            onClick = { filterSoldOutOnly = !filterSoldOutOnly },
+                                            shape = RoundedCornerShape(8.dp),
+                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                                        ) {
+                                            Text(if (filterSoldOutOnly) "Show All" else "View (${zeroStockProducts.size})", fontSize = 12.sp)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     // Category Filter Chips
-                    if (state.categories.isNotEmpty()) {
+                    if (state.categories.isNotEmpty() || zeroStockProducts.isNotEmpty()) {
                         item {
                             LazyRow(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -160,16 +360,38 @@ fun MenuScreen(
                             ) {
                                 item {
                                     FilterChip(
-                                        selected = selectedCategoryFilter == null,
-                                        onClick = { selectedCategoryFilter = null },
+                                        selected = selectedCategoryFilter == null && !filterSoldOutOnly,
+                                        onClick = {
+                                            selectedCategoryFilter = null
+                                            filterSoldOutOnly = false
+                                        },
                                         label = { Text("All (${state.products.size})") }
                                     )
+                                }
+                                if (zeroStockProducts.isNotEmpty()) {
+                                    item {
+                                        FilterChip(
+                                            selected = filterSoldOutOnly,
+                                            onClick = {
+                                                filterSoldOutOnly = !filterSoldOutOnly
+                                                if (filterSoldOutOnly) selectedCategoryFilter = null
+                                            },
+                                            label = { Text("⚠️ Sold Out (${zeroStockProducts.size})") },
+                                            colors = FilterChipDefaults.filterChipColors(
+                                                selectedContainerColor = Color(0xFFFFEBEE),
+                                                selectedLabelColor = Color(0xFFC62828)
+                                            )
+                                        )
+                                    }
                                 }
                                 items(state.categories, key = { it.id }) { cat ->
                                     val count = state.products.count { it.categoryId == cat.id }
                                     FilterChip(
-                                        selected = selectedCategoryFilter == cat.id,
-                                        onClick = { selectedCategoryFilter = if (selectedCategoryFilter == cat.id) null else cat.id },
+                                        selected = selectedCategoryFilter == cat.id && !filterSoldOutOnly,
+                                        onClick = {
+                                            filterSoldOutOnly = false
+                                            selectedCategoryFilter = if (selectedCategoryFilter == cat.id) null else cat.id
+                                        },
                                         label = { Text("${cat.name} ($count)") }
                                     )
                                 }
@@ -178,7 +400,57 @@ fun MenuScreen(
                     }
 
                     // Products list
-                    if (filteredProducts.isEmpty()) {
+                    if (state.isLoading && state.products.isEmpty()) {
+                        items(5) {
+                            ProductCardSkeleton()
+                        }
+                    } else if (state.errorMessage != null && state.products.isEmpty()) {
+                        item {
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(16.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f))
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(28.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Warning,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.error,
+                                        modifier = Modifier.size(42.dp)
+                                    )
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    Text(
+                                        text = "Unable to load menu",
+                                        fontWeight = FontWeight.Bold,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        color = MaterialTheme.colorScheme.onErrorContainer
+                                    )
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        text = state.errorMessage,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.85f),
+                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                    )
+                                    Spacer(modifier = Modifier.height(16.dp))
+                                    Button(
+                                        onClick = onRefresh,
+                                        colors = ButtonDefaults.buttonColors(containerColor = SndmartOrange)
+                                    ) {
+                                        Icon(imageVector = Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("Retry Loading Menu")
+                                    }
+                                }
+                            }
+                        }
+                    } else if (filteredProducts.isEmpty()) {
                         item {
                             Card(
                                 modifier = Modifier.fillMaxWidth(),
@@ -285,12 +557,61 @@ fun MenuScreen(
                                             )
                                         }
                                         Spacer(modifier = Modifier.height(4.dp))
-                                        Text(
-                                            text = "₹${"%.2f".format(product.price)}",
-                                            style = MaterialTheme.typography.titleMedium,
-                                            fontWeight = FontWeight.Bold,
-                                            color = SndmartOrange
-                                        )
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Text(
+                                                text = "₹${"%.2f".format(product.price)}",
+                                                style = MaterialTheme.typography.titleMedium,
+                                                fontWeight = FontWeight.Bold,
+                                                color = SndmartOrange
+                                            )
+                                            // Stock Badge
+                                            if (product.isSoldOut) {
+                                                Surface(
+                                                    color = Color(0xFFFFEBEE),
+                                                    shape = RoundedCornerShape(6.dp),
+                                                    border = BorderStroke(1.dp, Color(0xFFFFCDD2))
+                                                ) {
+                                                    Row(
+                                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(3.dp)
+                                                    ) {
+                                                        Box(modifier = Modifier.size(6.dp).background(Color(0xFFD32F2F), CircleShape))
+                                                        Text(
+                                                            text = "Sold Out (0)",
+                                                            color = Color(0xFFC62828),
+                                                            fontSize = 10.sp,
+                                                            fontWeight = FontWeight.Bold
+                                                        )
+                                                    }
+                                                }
+                                            } else {
+                                                val stock = product.effectiveStock
+                                                val isLow = stock <= 10
+                                                Surface(
+                                                    color = if (isLow) Color(0xFFFFF3E0) else Color(0xFFE8F5E9),
+                                                    shape = RoundedCornerShape(6.dp),
+                                                    border = BorderStroke(1.dp, if (isLow) Color(0xFFFFE0B2) else Color(0xFFC8E6C9))
+                                                ) {
+                                                    Row(
+                                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(3.dp)
+                                                    ) {
+                                                        Box(modifier = Modifier.size(6.dp).background(if (isLow) Color(0xFFEF6C00) else Color(0xFF2E7D32), CircleShape))
+                                                        Text(
+                                                            text = if (isLow) "Low: $stock" else "Stock: $stock",
+                                                            color = if (isLow) Color(0xFFE65100) else Color(0xFF1B5E20),
+                                                            fontSize = 10.sp,
+                                                            fontWeight = FontWeight.SemiBold
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
                                     }
 
                                     // Action buttons & Active Toggle
@@ -298,6 +619,20 @@ fun MenuScreen(
                                         horizontalAlignment = Alignment.End,
                                         verticalArrangement = Arrangement.spacedBy(4.dp)
                                     ) {
+                                        if (product.isSoldOut && onQuickRestockItem != null) {
+                                            FilledTonalButton(
+                                                onClick = { onQuickRestockItem(product.id, 100) },
+                                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                                                shape = RoundedCornerShape(6.dp),
+                                                colors = ButtonDefaults.filledTonalButtonColors(
+                                                    containerColor = Color(0xFFFFE0B2),
+                                                    contentColor = Color(0xFFE65100)
+                                                ),
+                                                modifier = Modifier.height(24.dp)
+                                            ) {
+                                                Text("+100 Stock", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                            }
+                                        }
                                         Row(
                                             verticalAlignment = Alignment.CenterVertically,
                                             horizontalArrangement = Arrangement.spacedBy(4.dp)
@@ -344,6 +679,33 @@ fun MenuScreen(
                             }
                         }
                     }
+
+                    // Rule 1: Pagination footer (30 items at a time)
+                    if (state.isLoadingMore) {
+                        item {
+                            ProductCardSkeleton()
+                        }
+                    } else if (state.canLoadMore && filteredProducts.isNotEmpty()) {
+                        item {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 12.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                OutlinedButton(
+                                    onClick = onLoadMore,
+                                    shape = RoundedCornerShape(12.dp),
+                                    border = BorderStroke(1.dp, SndmartOrange.copy(alpha = 0.5f)),
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = SndmartOrange)
+                                ) {
+                                    Icon(imageVector = Icons.Default.ExpandMore, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Load More Items (30 more)", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
@@ -386,7 +748,53 @@ fun MenuScreen(
                         }
                     }
 
-                    if (state.categories.isEmpty()) {
+                    if (state.errorMessage != null && state.categories.isEmpty()) {
+                        item {
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(16.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f))
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(28.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Warning,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.error,
+                                        modifier = Modifier.size(42.dp)
+                                    )
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    Text(
+                                        text = "Unable to load categories",
+                                        fontWeight = FontWeight.Bold,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        color = MaterialTheme.colorScheme.onErrorContainer
+                                    )
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        text = state.errorMessage,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.85f),
+                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                    )
+                                    Spacer(modifier = Modifier.height(16.dp))
+                                    Button(
+                                        onClick = onRefresh,
+                                        colors = ButtonDefaults.buttonColors(containerColor = SndmartOrange)
+                                    ) {
+                                        Icon(imageVector = Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("Retry Loading Categories")
+                                    }
+                                }
+                            }
+                        }
+                    } else if (state.categories.isEmpty()) {
                         item {
                             Card(
                                 modifier = Modifier.fillMaxWidth(),
@@ -684,7 +1092,8 @@ fun MenuScreen(
                                     text = errorMsg ?: "",
                                     color = MaterialTheme.colorScheme.onErrorContainer,
                                     fontSize = 12.sp,
-                                    fontWeight = FontWeight.Medium
+                                    fontWeight = FontWeight.Medium,
+                                    modifier = Modifier.weight(1f)
                                 )
                             }
                         }
@@ -786,7 +1195,7 @@ fun MenuScreen(
                                             if (catSuccess) {
                                                 editingCategory = null
                                             } else {
-                                                errorMsg = catErr
+                                                errorMsg = catErr ?: "Failed to update category"
                                             }
                                         }
                                     } else {
@@ -795,7 +1204,7 @@ fun MenuScreen(
                                             if (catSuccess) {
                                                 showAddCategoryDialog = false
                                             } else {
-                                                errorMsg = catErr
+                                                errorMsg = catErr ?: "Failed to add category"
                                             }
                                         }
                                     }
@@ -813,7 +1222,7 @@ fun MenuScreen(
                                     if (success) {
                                         editingCategory = null
                                     } else {
-                                        errorMsg = err
+                                        errorMsg = err ?: "Failed to update category"
                                     }
                                 }
                             } else {
@@ -822,7 +1231,7 @@ fun MenuScreen(
                                     if (success) {
                                         showAddCategoryDialog = false
                                     } else {
-                                        errorMsg = err
+                                        errorMsg = err ?: "Failed to add category"
                                     }
                                 }
                             }
@@ -862,6 +1271,9 @@ fun MenuScreen(
     // 2. Add / Edit Product Dialog
     if (showAddProductDialog || editingProduct != null) {
         val isEdit = editingProduct != null
+        val currentStock = editingProduct?.effectiveStock
+        val isCurrentSoldOut = isEdit && (currentStock == null || currentStock <= 0)
+
         var name by remember { mutableStateOf(editingProduct?.name ?: "") }
         var categoryId by remember { mutableStateOf(editingProduct?.categoryId ?: state.categories.firstOrNull()?.id) }
         var priceStr by remember { mutableStateOf(if (isEdit) editingProduct!!.price.toString() else "") }
@@ -875,6 +1287,20 @@ fun MenuScreen(
         var availableUntil by remember { mutableStateOf(editingProduct?.availableUntil ?: "") }
         var errorMsg by remember { mutableStateOf<String?>(null) }
         var isSubmitting by remember { mutableStateOf(false) }
+
+        // Stock quantity state - restaurant default is 100 so items are orderable
+        var isUnlimitedStock by remember {
+            mutableStateOf(!isEdit || (currentStock != null && currentStock >= 100))
+        }
+        var stockQtyStr by remember {
+            mutableStateOf(
+                if (isEdit) {
+                    if (currentStock != null && currentStock > 0) currentStock.toString() else "100"
+                } else {
+                    "100"
+                }
+            )
+        }
 
         var categoryDropdownExpanded by remember { mutableStateOf(false) }
 
@@ -893,6 +1319,43 @@ fun MenuScreen(
                     modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
+                    if (isCurrentSoldOut) {
+                        item {
+                            Surface(
+                                color = Color(0xFFFFEBEE),
+                                shape = RoundedCornerShape(10.dp),
+                                border = BorderStroke(1.dp, Color(0xFFFFCDD2)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Warning,
+                                        contentDescription = null,
+                                        tint = Color(0xFFC62828),
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Column {
+                                        Text(
+                                            text = "Stock is currently 0 (Sold Out)",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 13.sp,
+                                            color = Color(0xFFB71C1C)
+                                        )
+                                        Text(
+                                            text = "Customers cannot order this item right now. Update stock below (suggested: 100) to make it orderable.",
+                                            fontSize = 11.sp,
+                                            color = Color(0xFF5D4037)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     if (errorMsg != null) {
                         item {
                             Surface(
@@ -1058,6 +1521,120 @@ fun MenuScreen(
                         }
                     }
 
+                    // Stock & Inventory (Required) Card
+                    item {
+                        Card(
+                            shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFFF8FAFC)),
+                            border = BorderStroke(1.dp, PolishBorderLight),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(14.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Inventory2,
+                                            contentDescription = null,
+                                            tint = SndmartOrange,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                        Column {
+                                            Text(
+                                                text = "Always In Stock (Made to order)",
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Slate900
+                                            )
+                                            Text(
+                                                text = if (isUnlimitedStock) "Item stays orderable whenever kitchen is open (100 buffer)" else "Tracking exact portion count",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = Slate500,
+                                                fontSize = 11.sp
+                                            )
+                                        }
+                                    }
+                                    Switch(
+                                        checked = isUnlimitedStock,
+                                        onCheckedChange = { checked ->
+                                            isUnlimitedStock = checked
+                                            if (checked && stockQtyStr.toIntOrNull()?.let { it <= 0 } != false) {
+                                                stockQtyStr = "100"
+                                            }
+                                        }
+                                    )
+                                }
+
+                                Divider(color = PolishBorderLight)
+
+                                OutlinedTextField(
+                                    value = stockQtyStr,
+                                    onValueChange = {
+                                        stockQtyStr = it.filter { char -> char.isDigit() }
+                                        errorMsg = null
+                                    },
+                                    label = { Text("Stock Quantity (Portions Available) *") },
+                                    placeholder = { Text("e.g. 100") },
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                    singleLine = true,
+                                    colors = polishTextFieldColors(),
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(10.dp),
+                                    supportingText = {
+                                        if (isUnlimitedStock) {
+                                            Text(
+                                                "✓ Maintained at high buffer ($stockQtyStr) so customers can order whenever store is open.",
+                                                color = SndmartGreen,
+                                                fontSize = 11.sp
+                                            )
+                                        } else {
+                                            Text(
+                                                "Item automatically shows as Sold Out when stock reaches 0.",
+                                                color = Slate500,
+                                                fontSize = 11.sp
+                                            )
+                                        }
+                                    }
+                                )
+
+                                Text(
+                                    text = "Quick Stock Fill:",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Slate500
+                                )
+                                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    val stockPresets = listOf(10, 25, 50, 100, 250, 500)
+                                    items(stockPresets) { preset ->
+                                        val isSelected = stockQtyStr == preset.toString()
+                                        SuggestionChip(
+                                            onClick = {
+                                                stockQtyStr = preset.toString()
+                                                if (preset >= 100) isUnlimitedStock = true
+                                                errorMsg = null
+                                            },
+                                            label = { Text("$preset units", fontSize = 11.sp) },
+                                            colors = SuggestionChipDefaults.suggestionChipColors(
+                                                containerColor = if (isSelected) SndmartOrange.copy(alpha = 0.15f) else Color.Transparent,
+                                                labelColor = if (isSelected) SndmartOrange else Slate700
+                                            ),
+                                            border = BorderStroke(1.dp, if (isSelected) SndmartOrange else PolishBorderLight)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     // Active Switch
                     item {
                         Row(
@@ -1085,6 +1662,12 @@ fun MenuScreen(
                             return@Button
                         }
 
+                        val finalStock = stockQtyStr.toIntOrNull()
+                        if (finalStock == null || finalStock < 0) {
+                            errorMsg = "Please enter a valid stock quantity (0 or greater)"
+                            return@Button
+                        }
+
                         // Upload image if a new photo was selected
                         if (selectedProductPhoto != null) {
                             val photo = selectedProductPhoto!!
@@ -1102,6 +1685,8 @@ fun MenuScreen(
                                             "name" to cleanName,
                                             "price" to price,
                                             "is_active" to isActive,
+                                            "stock_qty" to finalStock,
+                                            "is_available" to (isActive && finalStock > 0),
                                             "image_url" to uploadedUrl
                                         )
                                         if (categoryId != null) updates["category_id"] = categoryId
@@ -1121,7 +1706,9 @@ fun MenuScreen(
                                             uploadedUrl,
                                             isActive,
                                             availableFrom.ifBlank { null },
-                                            availableUntil.ifBlank { null }
+                                            availableUntil.ifBlank { null },
+                                            finalStock,
+                                            isActive && finalStock > 0
                                         ) { pSuccess, pErr ->
                                             isSubmitting = false
                                             if (pSuccess) showAddProductDialog = false
@@ -1140,7 +1727,9 @@ fun MenuScreen(
                                 val updates = mutableMapOf<String, Any?>(
                                     "name" to cleanName,
                                     "price" to price,
-                                    "is_active" to isActive
+                                    "is_active" to isActive,
+                                    "stock_qty" to finalStock,
+                                    "is_available" to (isActive && finalStock > 0)
                                 )
                                 if (categoryId != null) updates["category_id"] = categoryId
                                 updates["description"] = description.ifBlank { null }
@@ -1160,7 +1749,9 @@ fun MenuScreen(
                                     imageUrl.ifBlank { null },
                                     isActive,
                                     availableFrom.ifBlank { null },
-                                    availableUntil.ifBlank { null }
+                                    availableUntil.ifBlank { null },
+                                    finalStock,
+                                    isActive && finalStock > 0
                                 ) { success, err ->
                                     isSubmitting = false
                                     if (success) showAddProductDialog = false

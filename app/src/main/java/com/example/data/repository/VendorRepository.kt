@@ -11,18 +11,40 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
+import java.util.UUID
+import org.json.JSONObject
+import retrofit2.Response
 
 sealed class Resource<out T> {
     data class Success<out T>(val data: T) : Resource<T>()
-    data class Error(val message: String, val code: Int? = null) : Resource<Nothing>()
+    data class Error(val message: String, override val code: Int? = null) : Resource<Nothing>()
     data object Loading : Resource<Nothing>()
+
+    open val code: Int?
+        get() = null
 }
 
 class VendorRepository(
     private val supabaseClient: SupabaseClient,
-    private val sessionManager: SessionManager
+    val sessionManager: SessionManager
 ) {
     private val api = supabaseClient.api
+
+    suspend fun getAuthenticatedUser(): Resource<AuthUser> = withContext(Dispatchers.IO) {
+        try {
+            val response = api.getAuthUser()
+            if (response.isSuccessful && response.body() != null) {
+                val user = response.body()!!
+                sessionManager.userId = user.id
+                Resource.Success(user)
+            } else {
+                val err = extractErrorMessage(response, "Failed to get authenticated user")
+                Resource.Error(err, response.code())
+            }
+        } catch (e: Exception) {
+            Resource.Error(e.localizedMessage ?: "Network error fetching user")
+        }
+    }
 
     private fun getCurrentIsoDate(): String {
         val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US)
@@ -30,15 +52,102 @@ class VendorRepository(
         return sdf.format(Date())
     }
 
-    suspend fun login(email: String, pass: String): Resource<Vendor> = withContext(Dispatchers.IO) {
+    private fun generateSlug(name: String): String {
+        val slug = name.lowercase(Locale.ROOT)
+            .replace(Regex("[^a-z0-9]+"), "-")
+            .trim('-')
+        return if (slug.isNotBlank()) slug else "cat-${System.currentTimeMillis()}"
+    }
+
+    private fun <T> extractErrorMessage(response: Response<T>, defaultPrefix: String = ""): String {
+        val errorBody = try {
+            response.errorBody()?.string()
+        } catch (_: Exception) {
+            null
+        }
+
+        if (!errorBody.isNullOrBlank()) {
+            try {
+                val json = JSONObject(errorBody)
+                val msg = json.optString("message").takeIf { it.isNotBlank() && it != "null" }
+                    ?: json.optString("error_description").takeIf { it.isNotBlank() && it != "null" }
+                    ?: json.optString("error").takeIf { it.isNotBlank() && it != "null" }
+                    ?: json.optString("msg").takeIf { it.isNotBlank() && it != "null" }
+
+                val details = json.optString("details").takeIf { it.isNotBlank() && it != "null" }
+                val hint = json.optString("hint").takeIf { it.isNotBlank() && it != "null" }
+
+                val fullDetail = buildString {
+                    if (msg != null) append(msg)
+                    if (details != null && details != msg) {
+                        if (isNotEmpty()) append(" (").append(details).append(")")
+                        else append(details)
+                    }
+                    if (hint != null) {
+                        if (isNotEmpty()) append(" [Hint: ").append(hint).append("]")
+                        else append(hint)
+                    }
+                }
+
+                if (fullDetail.isNotBlank()) {
+                    android.util.Log.e("VendorRepository", "Supabase error (prefix='$defaultPrefix'): $fullDetail | raw: $errorBody")
+                    return if (defaultPrefix.isBlank() || fullDetail.startsWith(defaultPrefix, ignoreCase = true)) {
+                        fullDetail
+                    } else {
+                        "$defaultPrefix: $fullDetail"
+                    }
+                }
+            } catch (_: Exception) {
+                val trimmed = errorBody.trim()
+                if (trimmed.isNotBlank()) {
+                    android.util.Log.e("VendorRepository", "Raw error (prefix='$defaultPrefix'): $trimmed")
+                    return if (defaultPrefix.isBlank() || trimmed.startsWith(defaultPrefix, ignoreCase = true)) {
+                        trimmed
+                    } else {
+                        "$defaultPrefix: $trimmed"
+                    }
+                }
+            }
+        }
+
+        val httpMsg = response.message()
+        return if (!httpMsg.isNullOrBlank()) {
+            if (defaultPrefix.isBlank()) httpMsg else "$defaultPrefix: $httpMsg"
+        } else {
+            if (defaultPrefix.isBlank()) "Request failed (HTTP ${response.code()})" else "$defaultPrefix (HTTP ${response.code()})"
+        }
+    }
+
+    private fun formatPhoneOrEmail(input: String): Pair<String?, String?> {
+        val trimmed = input.trim()
+        val digitsOnly = trimmed.filter { it.isDigit() }
+        return if (trimmed.contains("@")) {
+            Pair(trimmed, null)
+        } else if (digitsOnly.length in 10..13) {
+            val phoneFormatted = if (digitsOnly.length == 10) "+91$digitsOnly" else if (digitsOnly.startsWith("91") && digitsOnly.length == 12) "+$digitsOnly" else "+$digitsOnly"
+            Pair(null, phoneFormatted)
+        } else {
+            // Default to email if contains non-digits, else format as +91 phone
+            if (digitsOnly.isNotEmpty()) Pair(null, if (digitsOnly.startsWith("91")) "+$digitsOnly" else "+91$digitsOnly")
+            else Pair(trimmed, null)
+        }
+    }
+
+    suspend fun login(identifier: String, pass: String): Resource<Vendor> = withContext(Dispatchers.IO) {
         try {
-            val authResponse = api.signInWithPassword(AuthRequest(email.trim(), pass))
+            val (emailVal, phoneVal) = formatPhoneOrEmail(identifier)
+            val authRequest = if (phoneVal != null) {
+                AuthRequest(phone = phoneVal, password = pass)
+            } else {
+                AuthRequest(email = emailVal, password = pass)
+            }
+            val authResponse = api.signInWithPassword(authRequest)
             if (!authResponse.isSuccessful) {
                 val errorBody = authResponse.errorBody()?.string()
                 val message = when {
-                    authResponse.code() == 400 -> "Invalid email or password. Please verify your credentials."
+                    authResponse.code() == 400 -> "Invalid mobile number or password. Please verify your credentials."
                     authResponse.code() == 401 -> "Unauthorized. Please check your login details."
-                    !errorBody.isNullOrEmpty() -> "Login failed: $errorBody"
+                    !errorBody.isNullOrEmpty() -> extractErrorMessage(authResponse, "Login failed")
                     else -> "Login failed (Error ${authResponse.code()})"
                 }
                 return@withContext Resource.Error(message, authResponse.code())
@@ -49,15 +158,60 @@ class VendorRepository(
                 return@withContext Resource.Error("Authentication succeeded but no access token received.")
             }
 
-            sessionManager.accessToken = body.accessToken
-            sessionManager.refreshToken = body.refreshToken
+            sessionManager.updateTokens(
+                newAccessToken = body.accessToken,
+                newRefreshToken = body.refreshToken,
+                expiresInSeconds = body.expiresIn
+            )
             sessionManager.userId = body.user.id
-            sessionManager.userEmail = body.user.email ?: email
+            sessionManager.userEmail = body.user.phone ?: body.user.email ?: identifier
+            sessionManager.sessionExpiredMessage = null
 
             // Fetch vendor row
             return@withContext fetchVendorProfile()
         } catch (e: Exception) {
             Resource.Error(e.localizedMessage ?: "Network error during login")
+        }
+    }
+
+    suspend fun validateOrRefreshSession(): Resource<Boolean> = withContext(Dispatchers.IO) {
+        val refreshToken = sessionManager.refreshToken
+        if (refreshToken.isNullOrBlank() || sessionManager.userId.isNullOrBlank()) {
+            sessionManager.clearSession()
+            return@withContext Resource.Error("No active session found", 401)
+        }
+
+        try {
+            val response = api.refreshToken(mapOf("refresh_token" to refreshToken))
+            if (response.isSuccessful) {
+                val body = response.body()
+                if (body?.accessToken != null) {
+                    sessionManager.updateTokens(
+                        newAccessToken = body.accessToken,
+                        newRefreshToken = body.refreshToken,
+                        expiresInSeconds = body.expiresIn
+                    )
+                    if (body.user?.id != null) {
+                        sessionManager.userId = body.user.id
+                    }
+                    sessionManager.sessionExpiredMessage = null
+                    Resource.Success(true)
+                } else {
+                    Resource.Error("Token refresh succeeded without access token", 500)
+                }
+            } else {
+                val code = response.code()
+                val errBody = response.errorBody()?.string() ?: ""
+                if (code == 400 || code == 401 || code == 403) {
+                    sessionManager.clearSession()
+                    sessionManager.notifySessionExpired("Your session expired, please log in again")
+                    Resource.Error("Your session expired, please log in again", 401)
+                } else {
+                    Resource.Error("Session check failed: $errBody", code)
+                }
+            }
+        } catch (e: Exception) {
+            Resource.Error(e.localizedMessage ?: "Network error checking session")
         }
     }
 
@@ -87,7 +241,12 @@ class VendorRepository(
 
     suspend fun updateStoreOpenStatus(vendorId: String, isOpen: Boolean): Resource<Vendor> = withContext(Dispatchers.IO) {
         try {
-            val response = api.updateVendor("eq.$vendorId", mapOf("is_open" to isOpen))
+            val updates = mutableMapOf<String, Any?>("is_open" to isOpen)
+            val cityId = sessionManager.cachedVendor?.cityId
+            if (!cityId.isNullOrBlank()) {
+                updates["city_id"] = cityId
+            }
+            val response = api.updateVendor("eq.$vendorId", updates)
             if (response.isSuccessful) {
                 val updated = response.body()?.firstOrNull()
                 if (updated != null) {
@@ -97,10 +256,10 @@ class VendorRepository(
                     // Update cache manually if representation is not returned
                     val cached = sessionManager.cachedVendor?.copy(isOpen = isOpen)
                     if (cached != null) sessionManager.cachedVendor = cached
-                    Resource.Success(cached ?: Vendor(id = vendorId, isOpen = isOpen))
+                    Resource.Success(cached ?: Vendor(id = vendorId, isOpen = isOpen, cityId = cityId))
                 }
             } else {
-                Resource.Error("Failed to update store status: ${response.message()}", response.code())
+                Resource.Error(extractErrorMessage(response, "Failed to update store status"), response.code())
             }
         } catch (e: Exception) {
             Resource.Error(e.localizedMessage ?: "Error updating store open status")
@@ -117,9 +276,22 @@ class VendorRepository(
         longitude: Double?,
         openingTime: String?,
         closingTime: String?,
-        bannerUrl: String?
+        bannerUrl: String?,
+        cityId: String? = null
     ): Resource<Vendor> = withContext(Dispatchers.IO) {
         try {
+            // Find existing city_id if not explicitly provided
+            var targetCityId = cityId?.ifBlank { null }
+                ?: sessionManager.cachedVendor?.cityId
+
+            // If still missing, attempt to fetch vendor profile to recover city_id
+            if (targetCityId.isNullOrBlank()) {
+                val fetched = fetchVendorProfile()
+                if (fetched is Resource.Success && !fetched.data.cityId.isNullOrBlank()) {
+                    targetCityId = fetched.data.cityId
+                }
+            }
+
             val updates = mutableMapOf<String, Any?>()
             updates["name"] = name
             if (ownerName != null) updates["owner_name"] = ownerName
@@ -130,6 +302,11 @@ class VendorRepository(
             if (openingTime != null) updates["opening_time"] = openingTime
             if (closingTime != null) updates["closing_time"] = closingTime
             if (bannerUrl != null) updates["banner_url"] = bannerUrl
+
+            // Critical: Postgres database requires non-null city_id on every update to vendors table
+            if (!targetCityId.isNullOrBlank()) {
+                updates["city_id"] = targetCityId
+            }
 
             val response = api.updateVendor("eq.$vendorId", updates)
             if (response.isSuccessful) {
@@ -148,47 +325,83 @@ class VendorRepository(
                         longitude = longitude,
                         openingTime = openingTime,
                         closingTime = closingTime,
-                        bannerUrl = bannerUrl
+                        bannerUrl = bannerUrl,
+                        cityId = targetCityId ?: current.cityId
                     )
                     sessionManager.cachedVendor = newVendor
                     Resource.Success(newVendor)
                 }
             } else {
-                Resource.Error("Failed to update profile: ${response.message()}", response.code())
+                Resource.Error(extractErrorMessage(response, "Failed to update profile"), response.code())
             }
         } catch (e: Exception) {
             Resource.Error(e.localizedMessage ?: "Error updating store profile")
         }
     }
 
+    // In-memory caches for slow-changing data (Rule 6)
+    private var cachedCities: List<City>? = null
+    private val cachedCategories: MutableMap<String, List<Category>> = java.util.concurrent.ConcurrentHashMap()
+
+    fun clearCaches() {
+        cachedCities = null
+        cachedCategories.clear()
+    }
+
     // Categories
-    suspend fun getCategories(vendorId: String): Resource<List<Category>> = withContext(Dispatchers.IO) {
+    suspend fun getCategories(vendorId: String, forceRefresh: Boolean = false): Resource<List<Category>> = withContext(Dispatchers.IO) {
+        if (!forceRefresh && cachedCategories.containsKey(vendorId)) {
+            val cached = cachedCategories[vendorId]
+            if (cached != null) return@withContext Resource.Success(cached)
+        }
         try {
             val response = api.getCategories("eq.$vendorId")
             if (response.isSuccessful) {
-                Resource.Success(response.body() ?: emptyList())
+                val cats = response.body() ?: emptyList()
+                cachedCategories[vendorId] = cats
+                Resource.Success(cats)
             } else {
-                Resource.Error("Failed to load categories: ${response.message()}", response.code())
+                Resource.Error(extractErrorMessage(response, "Failed to load categories"), response.code())
             }
         } catch (e: Exception) {
             Resource.Error(e.localizedMessage ?: "Error loading categories")
         }
     }
 
-    suspend fun createCategory(vendorId: String, name: String, imageUrl: String): Resource<Category> = withContext(Dispatchers.IO) {
+    suspend fun createCategory(
+        vendorId: String,
+        name: String,
+        imageUrl: String,
+        cityId: String? = null
+    ): Resource<Category> = withContext(Dispatchers.IO) {
         try {
-            val body = mapOf(
+            val cleanName = name.trim()
+            val cleanImageUrl = imageUrl.trim()
+            val slug = generateSlug(cleanName)
+            val resolvedCityId = cityId?.takeIf { it.isNotBlank() }
+                ?: sessionManager.cachedVendor?.cityId?.takeIf { it.isNotBlank() }
+
+            val body = mutableMapOf<String, Any?>(
+                "name" to cleanName,
+                "slug" to slug,
+                "image_url" to cleanImageUrl,
                 "vendor_id" to vendorId,
-                "name" to name.trim(),
-                "image_url" to imageUrl.trim()
+                "vendor_type" to "hotel",
+                "sort_order" to 0,
+                "is_active" to true
             )
+            if (!resolvedCityId.isNullOrBlank()) {
+                body["city_id"] = resolvedCityId
+            }
+
             val response = api.createCategory(body)
             if (response.isSuccessful) {
+                cachedCategories.remove(vendorId)
                 val item = response.body()?.firstOrNull()
                 if (item != null) Resource.Success(item)
                 else Resource.Error("Category created but no record returned")
             } else {
-                Resource.Error("Failed to add category: ${response.message()}", response.code())
+                Resource.Error(extractErrorMessage(response, "Failed to add category"), response.code())
             }
         } catch (e: Exception) {
             Resource.Error(e.localizedMessage ?: "Error adding category")
@@ -197,17 +410,23 @@ class VendorRepository(
 
     suspend fun updateCategory(categoryId: String, name: String, imageUrl: String): Resource<Category> = withContext(Dispatchers.IO) {
         try {
+            val cleanName = name.trim()
+            val cleanImageUrl = imageUrl.trim()
+            val slug = generateSlug(cleanName)
             val updates = mapOf(
-                "name" to name.trim(),
-                "image_url" to imageUrl.trim()
+                "name" to cleanName,
+                "slug" to slug,
+                "image_url" to cleanImageUrl,
+                "vendor_type" to "hotel"
             )
             val response = api.updateCategory("eq.$categoryId", updates)
             if (response.isSuccessful) {
+                sessionManager.cachedVendor?.id?.let { cachedCategories.remove(it) }
                 val item = response.body()?.firstOrNull()
                 if (item != null) Resource.Success(item)
-                else Resource.Success(Category(id = categoryId, name = name, imageUrl = imageUrl))
+                else Resource.Success(Category(id = categoryId, name = cleanName, imageUrl = cleanImageUrl, slug = slug, vendorType = "hotel"))
             } else {
-                Resource.Error("Failed to update category: ${response.message()}", response.code())
+                Resource.Error(extractErrorMessage(response, "Failed to update category"), response.code())
             }
         } catch (e: Exception) {
             Resource.Error(e.localizedMessage ?: "Error updating category")
@@ -218,23 +437,24 @@ class VendorRepository(
         try {
             val response = api.deleteCategory("eq.$categoryId")
             if (response.isSuccessful) {
+                sessionManager.cachedVendor?.id?.let { cachedCategories.remove(it) }
                 Resource.Success(Unit)
             } else {
-                Resource.Error("Failed to delete category: ${response.message()}", response.code())
+                Resource.Error(extractErrorMessage(response, "Failed to delete category"), response.code())
             }
         } catch (e: Exception) {
             Resource.Error(e.localizedMessage ?: "Error deleting category")
         }
     }
 
-    // Products
-    suspend fun getProducts(vendorId: String): Resource<List<Product>> = withContext(Dispatchers.IO) {
+    // Products (Rule 1: Paginated 30 at a time)
+    suspend fun getProducts(vendorId: String, limit: Int = 30, offset: Int = 0): Resource<List<Product>> = withContext(Dispatchers.IO) {
         try {
-            val response = api.getProducts("eq.$vendorId")
+            val response = api.getProducts(vendorIdFilter = "eq.$vendorId", limit = limit, offset = offset)
             if (response.isSuccessful) {
                 Resource.Success(response.body() ?: emptyList())
             } else {
-                Resource.Error("Failed to load products: ${response.message()}", response.code())
+                Resource.Error(extractErrorMessage(response, "Failed to load products"), response.code())
             }
         } catch (e: Exception) {
             Resource.Error(e.localizedMessage ?: "Error loading products")
@@ -250,14 +470,18 @@ class VendorRepository(
         imageUrl: String?,
         isActive: Boolean,
         availableFrom: String?,
-        availableUntil: String?
+        availableUntil: String?,
+        stockQty: Int = 100,
+        isAvailable: Boolean = true
     ): Resource<Product> = withContext(Dispatchers.IO) {
         try {
             val body = mutableMapOf<String, Any?>(
                 "vendor_id" to vendorId,
                 "name" to name.trim(),
                 "price" to price,
-                "is_active" to isActive
+                "is_active" to isActive,
+                "stock_qty" to stockQty,
+                "is_available" to (isAvailable && stockQty > 0)
             )
             if (!categoryId.isNullOrEmpty()) body["category_id"] = categoryId
             if (!description.isNullOrEmpty()) body["description"] = description.trim()
@@ -271,7 +495,7 @@ class VendorRepository(
                 if (item != null) Resource.Success(item)
                 else Resource.Error("Product created but no representation returned")
             } else {
-                Resource.Error("Failed to create product: ${response.message()}", response.code())
+                Resource.Error(extractErrorMessage(response, "Failed to create product"), response.code())
             }
         } catch (e: Exception) {
             Resource.Error(e.localizedMessage ?: "Error adding product")
@@ -283,13 +507,18 @@ class VendorRepository(
         updates: Map<String, Any?>
     ): Resource<Product> = withContext(Dispatchers.IO) {
         try {
-            val response = api.updateProduct("eq.$productId", updates)
+            val adjustedUpdates = updates.toMutableMap()
+            if (adjustedUpdates.containsKey("stock_qty") && !adjustedUpdates.containsKey("is_available")) {
+                val stock = (adjustedUpdates["stock_qty"] as? Number)?.toInt() ?: 0
+                adjustedUpdates["is_available"] = stock > 0
+            }
+            val response = api.updateProduct("eq.$productId", adjustedUpdates)
             if (response.isSuccessful) {
                 val item = response.body()?.firstOrNull()
                 if (item != null) Resource.Success(item)
                 else Resource.Success(Product(id = productId, name = updates["name"] as? String ?: ""))
             } else {
-                Resource.Error("Failed to update product: ${response.message()}", response.code())
+                Resource.Error(extractErrorMessage(response, "Failed to update product"), response.code())
             }
         } catch (e: Exception) {
             Resource.Error(e.localizedMessage ?: "Error updating product")
@@ -302,21 +531,61 @@ class VendorRepository(
             if (response.isSuccessful) {
                 Resource.Success(Unit)
             } else {
-                Resource.Error("Failed to delete product: ${response.message()}", response.code())
+                Resource.Error(extractErrorMessage(response, "Failed to delete product"), response.code())
             }
         } catch (e: Exception) {
             Resource.Error(e.localizedMessage ?: "Error deleting product")
         }
     }
 
-    // Orders
-    suspend fun getOrders(vendorId: String): Resource<List<Order>> = withContext(Dispatchers.IO) {
+    // Orders (Rule 1: Paginated 20 at a time)
+    suspend fun getOrders(vendorId: String, limit: Int = 20, offset: Int = 0): Resource<List<Order>> = withContext(Dispatchers.IO) {
         try {
-            val response = api.getOrders("eq.$vendorId")
+            var response = api.getOrders(
+                vendorIdFilter = "eq.$vendorId",
+                statusFilter = "in.(confirmed,preparing,ready,out_for_delivery,delivered,cancelled,rejected)",
+                limit = limit,
+                offset = offset
+            )
+
+            // Defensive fallback: If orders_customer_id_fkey relationship fails to resolve
+            if (!response.isSuccessful && response.code() == 400) {
+                val errorMsg = extractErrorMessage(response, "")
+                if (errorMsg.contains("orders_customer_id_fkey") || errorMsg.contains("relationship") || errorMsg.contains("PGRST200")) {
+                    android.util.Log.w("VendorRepository", "orders_customer_id_fkey not resolved, retrying with customer:profiles: $errorMsg")
+                    val fallbackSelect = "id,order_number,status,subtotal,discount_amount,delivery_fee,handling_fee,total_amount,commission_amount,vendor_amount,notes,payment_status,payment_method,delivery_address,created_at,order_items(id,product_name,quantity,unit_price,total_price),customer:profiles(full_name,phone)"
+                    response = api.getOrders(
+                        vendorIdFilter = "eq.$vendorId",
+                        statusFilter = "in.(confirmed,preparing,ready,out_for_delivery,delivered,cancelled,rejected)",
+                        select = fallbackSelect,
+                        limit = limit,
+                        offset = offset
+                    )
+
+                    if (!response.isSuccessful && response.code() == 400) {
+                        val errorMsg2 = extractErrorMessage(response, "")
+                        if (errorMsg2.contains("profiles") || errorMsg2.contains("relationship") || errorMsg2.contains("PGRST200")) {
+                            android.util.Log.w("VendorRepository", "Profiles join not resolved, retrying without customer join: $errorMsg2")
+                            val baseSelect = "id,order_number,status,subtotal,discount_amount,delivery_fee,handling_fee,total_amount,commission_amount,vendor_amount,notes,payment_status,payment_method,delivery_address,created_at,order_items(id,product_name,quantity,unit_price,total_price)"
+                            response = api.getOrders(
+                                vendorIdFilter = "eq.$vendorId",
+                                statusFilter = "in.(confirmed,preparing,ready,out_for_delivery,delivered,cancelled,rejected)",
+                                select = baseSelect,
+                                limit = limit,
+                                offset = offset
+                            )
+                        }
+                    }
+                }
+            }
+
             if (response.isSuccessful) {
-                Resource.Success(response.body() ?: emptyList())
+                // Defensive filter: Vendor never sees pending orders until City Admin accepts
+                val confirmedAndActiveOrders = (response.body() ?: emptyList())
+                    .filter { it.status.lowercase() != "pending" }
+                Resource.Success(confirmedAndActiveOrders)
             } else {
-                Resource.Error("Failed to load orders: ${response.message()}", response.code())
+                Resource.Error(extractErrorMessage(response, "Failed to load orders"), response.code())
             }
         } catch (e: Exception) {
             Resource.Error(e.localizedMessage ?: "Error loading orders")
@@ -325,13 +594,24 @@ class VendorRepository(
 
     suspend fun getOrderById(orderId: String): Resource<Order> = withContext(Dispatchers.IO) {
         try {
-            val response = api.getOrderById("eq.$orderId")
+            var response = api.getOrderById("eq.$orderId")
+            if (!response.isSuccessful && response.code() == 400) {
+                val errorMsg = extractErrorMessage(response, "")
+                if (errorMsg.contains("orders_customer_id_fkey") || errorMsg.contains("relationship")) {
+                    response = api.getOrderById("eq.$orderId", select = "*,order_items(*)")
+                }
+            }
             if (response.isSuccessful) {
                 val order = response.body()?.firstOrNull()
-                if (order != null) Resource.Success(order)
-                else Resource.Error("Order not found")
+                if (order != null) {
+                    if (order.status.lowercase() == "pending") {
+                        Resource.Error("Order is still pending City Admin acceptance")
+                    } else {
+                        Resource.Success(order)
+                    }
+                } else Resource.Error("Order not found")
             } else {
-                Resource.Error("Failed to fetch order: ${response.message()}", response.code())
+                Resource.Error(extractErrorMessage(response, "Failed to fetch order"), response.code())
             }
         } catch (e: Exception) {
             Resource.Error(e.localizedMessage ?: "Error fetching order")
@@ -349,6 +629,8 @@ class VendorRepository(
             val nowIso = getCurrentIsoDate()
             when (newStatus.lowercase()) {
                 "confirmed" -> orderUpdates["confirmed_at"] = nowIso
+                "preparing" -> orderUpdates["preparing_at"] = nowIso
+                "ready" -> orderUpdates["ready_at"] = nowIso
                 "delivered" -> orderUpdates["delivered_at"] = nowIso
                 "cancelled", "rejected" -> orderUpdates["cancelled_at"] = nowIso
             }
@@ -379,47 +661,47 @@ class VendorRepository(
                 if (updatedOrder != null) Resource.Success(updatedOrder)
                 else Resource.Success(Order(id = orderId, status = newStatus))
             } else {
-                Resource.Error("Failed to update order status: ${response.message()}", response.code())
+                Resource.Error(extractErrorMessage(response, "Failed to update order status"), response.code())
             }
         } catch (e: Exception) {
             Resource.Error(e.localizedMessage ?: "Error updating order status")
         }
     }
 
-    // Earnings & Wallet
-    suspend fun getWalletTransactions(vendorId: String): Resource<List<WalletTransaction>> = withContext(Dispatchers.IO) {
+    // Earnings & Wallet (Rule 1: Paginated 20 at a time)
+    suspend fun getWalletTransactions(vendorId: String, limit: Int = 20, offset: Int = 0): Resource<List<WalletTransaction>> = withContext(Dispatchers.IO) {
         try {
-            val response = api.getWalletTransactions("eq.$vendorId")
+            val response = api.getWalletTransactions(vendorIdFilter = "eq.$vendorId", limit = limit, offset = offset)
             if (response.isSuccessful) {
                 Resource.Success(response.body() ?: emptyList())
             } else {
-                Resource.Error("Failed to load wallet transactions: ${response.message()}", response.code())
+                Resource.Error(extractErrorMessage(response, "Failed to load wallet transactions"), response.code())
             }
         } catch (e: Exception) {
             Resource.Error(e.localizedMessage ?: "Error loading wallet transactions")
         }
     }
 
-    suspend fun getPayouts(vendorId: String): Resource<List<Payout>> = withContext(Dispatchers.IO) {
+    suspend fun getPayouts(vendorId: String, limit: Int = 20, offset: Int = 0): Resource<List<Payout>> = withContext(Dispatchers.IO) {
         try {
-            val response = api.getPayouts("eq.$vendorId")
+            val response = api.getPayouts(vendorIdFilter = "eq.$vendorId", limit = limit, offset = offset)
             if (response.isSuccessful) {
                 Resource.Success(response.body() ?: emptyList())
             } else {
-                Resource.Error("Failed to load payouts: ${response.message()}", response.code())
+                Resource.Error(extractErrorMessage(response, "Failed to load payouts"), response.code())
             }
         } catch (e: Exception) {
             Resource.Error(e.localizedMessage ?: "Error loading payouts")
         }
     }
 
-    suspend fun getWithdrawals(vendorId: String): Resource<List<Withdrawal>> = withContext(Dispatchers.IO) {
+    suspend fun getWithdrawals(vendorId: String, limit: Int = 20, offset: Int = 0): Resource<List<Withdrawal>> = withContext(Dispatchers.IO) {
         try {
-            val response = api.getWithdrawals("eq.$vendorId")
+            val response = api.getWithdrawals(vendorIdFilter = "eq.$vendorId", limit = limit, offset = offset)
             if (response.isSuccessful) {
                 Resource.Success(response.body() ?: emptyList())
             } else {
-                Resource.Error("Failed to load withdrawals: ${response.message()}", response.code())
+                Resource.Error(extractErrorMessage(response, "Failed to load withdrawals"), response.code())
             }
         } catch (e: Exception) {
             Resource.Error(e.localizedMessage ?: "Error loading withdrawals")
@@ -447,21 +729,22 @@ class VendorRepository(
                 if (created != null) Resource.Success(created)
                 else Resource.Success(Withdrawal(vendorId = vendorId, amount = amount, status = "pending", note = note))
             } else {
-                Resource.Error("Failed to submit withdrawal request: ${response.message()}", response.code())
+                val errMsg = extractErrorMessage(response, "")
+                Resource.Error(errMsg.ifBlank { "Failed to submit withdrawal request" }, response.code())
             }
         } catch (e: Exception) {
             Resource.Error(e.localizedMessage ?: "Error submitting withdrawal request")
         }
     }
 
-    // Reviews
-    suspend fun getReviews(vendorId: String): Resource<List<Review>> = withContext(Dispatchers.IO) {
+    // Reviews (Rule 1: Paginated 20 at a time)
+    suspend fun getReviews(vendorId: String, limit: Int = 20, offset: Int = 0): Resource<List<Review>> = withContext(Dispatchers.IO) {
         try {
-            val response = api.getReviews("eq.$vendorId")
+            val response = api.getReviews(vendorIdFilter = "eq.$vendorId", limit = limit, offset = offset)
             if (response.isSuccessful) {
                 Resource.Success(response.body() ?: emptyList())
             } else {
-                Resource.Error("Failed to load reviews: ${response.message()}", response.code())
+                Resource.Error(extractErrorMessage(response, "Failed to load reviews"), response.code())
             }
         } catch (e: Exception) {
             Resource.Error(e.localizedMessage ?: "Error loading reviews")
@@ -469,13 +752,37 @@ class VendorRepository(
     }
 
     // Operating Hours
+    private fun normalizeTimeFormat(time: String): String {
+        val trimmed = time.trim()
+        val parts = trimmed.split(":")
+        return when (parts.size) {
+            1 -> {
+                val h = parts[0].toIntOrNull() ?: 0
+                String.format(java.util.Locale.US, "%02d:00:00", h)
+            }
+            2 -> {
+                val h = parts[0].toIntOrNull() ?: 0
+                val m = parts[1].toIntOrNull() ?: 0
+                String.format(java.util.Locale.US, "%02d:%02d:00", h, m)
+            }
+            3 -> {
+                val h = parts[0].toIntOrNull() ?: 0
+                val m = parts[1].toIntOrNull() ?: 0
+                val s = parts[2].toIntOrNull() ?: 0
+                String.format(java.util.Locale.US, "%02d:%02d:%02d", h, m, s)
+            }
+            else -> trimmed
+        }
+    }
+
     suspend fun getOperatingHours(vendorId: String): Resource<List<OperatingHour>> = withContext(Dispatchers.IO) {
         try {
             val response = api.getOperatingHours("eq.$vendorId")
             if (response.isSuccessful) {
                 Resource.Success(response.body() ?: emptyList())
             } else {
-                Resource.Error("Failed to load operating hours: ${response.message()}", response.code())
+                val errorMsg = extractErrorMessage(response, "Failed to load operating hours")
+                Resource.Error(errorMsg, response.code())
             }
         } catch (e: Exception) {
             Resource.Error(e.localizedMessage ?: "Error loading operating hours")
@@ -484,31 +791,51 @@ class VendorRepository(
 
     suspend fun addOperatingHour(
         vendorId: String,
-        dayOfWeek: String?,
         startTime: String,
         endTime: String,
-        isActive: Boolean = true,
-        isClosed: Boolean = false
+        isActive: Boolean = true
     ): Resource<OperatingHour> = withContext(Dispatchers.IO) {
         try {
-            val body = mutableMapOf<String, Any?>(
-                "vendor_id" to vendorId,
-                "start_time" to startTime,
-                "end_time" to endTime,
-                "is_active" to isActive,
-                "is_closed" to isClosed
-            )
-            if (dayOfWeek != null) body["day_of_week"] = dayOfWeek
+            // Verify vendor ID is fresh and valid
+            var effectiveVendorId = vendorId
+            if (effectiveVendorId.isBlank()) {
+                effectiveVendorId = sessionManager.cachedVendor?.id ?: ""
+            }
+            if (effectiveVendorId.isBlank()) {
+                val profileRes = fetchVendorProfile()
+                if (profileRes is Resource.Success) {
+                    effectiveVendorId = profileRes.data.id
+                }
+            }
+            if (effectiveVendorId.isBlank()) {
+                return@withContext Resource.Error("Could not determine current vendor ID. Please ensure you are logged in.")
+            }
 
+            val formattedStart = normalizeTimeFormat(startTime)
+            val formattedEnd = normalizeTimeFormat(endTime)
+
+            // Step 2: The vendor_operating_hours table has ONLY: id, vendor_id, start_time, end_time, is_active, created_at.
+            // Extra fields like 'day_of_week' or 'is_closed' will cause Supabase to reject the insert.
+            val body = mapOf<String, Any?>(
+                "vendor_id" to effectiveVendorId,
+                "start_time" to formattedStart,
+                "end_time" to formattedEnd,
+                "is_active" to isActive
+            )
+
+            android.util.Log.d("VendorRepository", "Inserting operating hour slot: $body")
             val response = api.createOperatingHour(body)
             if (response.isSuccessful) {
                 val item = response.body()?.firstOrNull()
                 if (item != null) Resource.Success(item)
-                else Resource.Success(OperatingHour(vendorId = vendorId, dayOfWeek = dayOfWeek, startTime = startTime, endTime = endTime, isActive = isActive, isClosed = isClosed))
+                else Resource.Success(OperatingHour(vendorId = effectiveVendorId, startTime = formattedStart, endTime = formattedEnd, isActive = isActive))
             } else {
-                Resource.Error("Failed to add operating hour: ${response.message()}", response.code())
+                val errorMsg = extractErrorMessage(response, "Failed to add operating hour")
+                android.util.Log.e("VendorRepository", "Add operating hour error: $errorMsg (code=${response.code()})")
+                Resource.Error(errorMsg, response.code())
             }
         } catch (e: Exception) {
+            android.util.Log.e("VendorRepository", "Exception adding operating hour", e)
             Resource.Error(e.localizedMessage ?: "Error adding operating hour")
         }
     }
@@ -517,28 +844,32 @@ class VendorRepository(
         id: String,
         startTime: String,
         endTime: String,
-        isActive: Boolean = true,
-        isClosed: Boolean = false,
-        dayOfWeek: String? = null
+        isActive: Boolean = true
     ): Resource<OperatingHour> = withContext(Dispatchers.IO) {
         try {
-            val updates = mutableMapOf<String, Any?>(
-                "start_time" to startTime,
-                "end_time" to endTime,
-                "is_active" to isActive,
-                "is_closed" to isClosed
-            )
-            if (dayOfWeek != null) updates["day_of_week"] = dayOfWeek
+            val formattedStart = normalizeTimeFormat(startTime)
+            val formattedEnd = normalizeTimeFormat(endTime)
 
+            // Step 2: Only columns existing on vendor_operating_hours: start_time, end_time, is_active
+            val updates = mapOf<String, Any?>(
+                "start_time" to formattedStart,
+                "end_time" to formattedEnd,
+                "is_active" to isActive
+            )
+
+            android.util.Log.d("VendorRepository", "Updating operating hour slot $id: $updates")
             val response = api.updateOperatingHour("eq.$id", updates)
             if (response.isSuccessful) {
                 val item = response.body()?.firstOrNull()
                 if (item != null) Resource.Success(item)
-                else Resource.Success(OperatingHour(id = id, startTime = startTime, endTime = endTime, isActive = isActive, isClosed = isClosed, dayOfWeek = dayOfWeek))
+                else Resource.Success(OperatingHour(id = id, startTime = formattedStart, endTime = formattedEnd, isActive = isActive))
             } else {
-                Resource.Error("Failed to update operating hour: ${response.message()}", response.code())
+                val errorMsg = extractErrorMessage(response, "Failed to update operating hour")
+                android.util.Log.e("VendorRepository", "Update operating hour error: $errorMsg (code=${response.code()})")
+                Resource.Error(errorMsg, response.code())
             }
         } catch (e: Exception) {
+            android.util.Log.e("VendorRepository", "Exception updating operating hour", e)
             Resource.Error(e.localizedMessage ?: "Error updating operating hour")
         }
     }
@@ -551,7 +882,11 @@ class VendorRepository(
             val updates = mapOf("is_active" to isActive)
             val response = api.updateOperatingHour("eq.$id", updates)
             if (response.isSuccessful) Resource.Success(Unit)
-            else Resource.Error("Failed to toggle operating hour: ${response.message()}", response.code())
+            else {
+                val errorMsg = extractErrorMessage(response, "Failed to toggle operating hour")
+                android.util.Log.e("VendorRepository", "Toggle operating hour error: $errorMsg (code=${response.code()})")
+                Resource.Error(errorMsg, response.code())
+            }
         } catch (e: Exception) {
             Resource.Error(e.localizedMessage ?: "Error toggling operating hour")
         }
@@ -561,7 +896,11 @@ class VendorRepository(
         try {
             val response = api.deleteOperatingHour("eq.$id")
             if (response.isSuccessful) Resource.Success(Unit)
-            else Resource.Error("Failed to remove operating hour: ${response.message()}", response.code())
+            else {
+                val errorMsg = extractErrorMessage(response, "Failed to delete operating hour")
+                android.util.Log.e("VendorRepository", "Delete operating hour error: $errorMsg (code=${response.code()})")
+                Resource.Error(errorMsg, response.code())
+            }
         } catch (e: Exception) {
             Resource.Error(e.localizedMessage ?: "Error deleting operating hour")
         }
@@ -608,14 +947,27 @@ class VendorRepository(
         }
     }
 
-    // 13. Cities for Self-Registration
-    suspend fun getActiveCities(): Resource<List<City>> = withContext(Dispatchers.IO) {
+    // 13. Cities for Self-Registration (Rule 6: Cached)
+    suspend fun getActiveCities(forceRefresh: Boolean = false): Resource<List<City>> = withContext(Dispatchers.IO) {
+        if (!forceRefresh && !cachedCities.isNullOrEmpty()) {
+            return@withContext Resource.Success(cachedCities!!)
+        }
         try {
             android.util.Log.d("VendorRepository", "Fetching active cities: select=id,name, status=eq.active, order=name.asc")
-            val response = api.getCities(select = "id,name", statusFilter = "eq.active", order = "name.asc")
+            var response = api.getCities(select = "id,name", statusFilter = "eq.active", order = "name.asc")
+            if (response.isSuccessful && (response.body().isNullOrEmpty())) {
+                android.util.Log.w("VendorRepository", "No active cities returned with status=eq.active; trying without status filter fallback")
+                val fallbackResponse = api.getCities(select = "id,name", statusFilter = null, order = "name.asc")
+                if (fallbackResponse.isSuccessful && !fallbackResponse.body().isNullOrEmpty()) {
+                    response = fallbackResponse
+                }
+            }
             if (response.isSuccessful) {
                 val cities = response.body() ?: emptyList()
-                android.util.Log.d("VendorRepository", "Successfully fetched ${cities.size} active cities: $cities")
+                if (cities.isNotEmpty()) {
+                    cachedCities = cities
+                }
+                android.util.Log.d("VendorRepository", "Successfully fetched ${cities.size} cities: $cities")
                 println("cities fetch success: fetched ${cities.size} cities: $cities")
                 Resource.Success(cities)
             } else {
@@ -639,37 +991,44 @@ class VendorRepository(
         }
     }
 
-    // 14. Self-Registration Flow
-    suspend fun signUp(email: String, pass: String): Resource<AuthResponse> = withContext(Dispatchers.IO) {
+    // 14. Self-Registration Flow (Mobile SMS OTP)
+    suspend fun signUpWithPhone(phone: String, pass: String): Resource<AuthResponse> = withContext(Dispatchers.IO) {
         try {
-            val response = api.signUp(SignUpRequest(email = email.trim(), password = pass))
+            val formattedPhone = formatPhoneWithCountryCode(phone)
+            val response = api.signUp(SignUpRequest(phone = formattedPhone, password = pass))
             if (response.isSuccessful) {
                 val body = response.body()
                 if (body != null) {
+                    if (body.accessToken != null && body.user != null) {
+                        sessionManager.accessToken = body.accessToken
+                        sessionManager.refreshToken = body.refreshToken
+                        sessionManager.userId = body.user.id
+                        sessionManager.userEmail = body.user.phone ?: formattedPhone
+                    }
                     Resource.Success(body)
                 } else {
                     Resource.Error("Sign up response was empty")
                 }
             } else {
-                val err = response.errorBody()?.string()
-                Resource.Error(err ?: "Sign up failed with error code ${response.code()}", response.code())
+                val err = extractErrorMessage(response, "Sign up failed")
+                Resource.Error(err, response.code())
             }
         } catch (e: Exception) {
             Resource.Error(e.localizedMessage ?: "Network error during sign up")
         }
     }
 
-    suspend fun verifyOtp(email: String, token: String): Resource<AuthResponse> = withContext(Dispatchers.IO) {
+    suspend fun verifyPhoneOtp(phone: String, token: String): Resource<AuthResponse> = withContext(Dispatchers.IO) {
         try {
-            // First try type = 'email'
-            var response = api.verifyOtp(VerifyOtpRequest(email = email.trim(), token = token.trim(), type = "email"))
-            if (!response.isSuccessful) {
-                // Fallback attempt with type = 'signup'
-                val fallbackResponse = api.verifyOtp(VerifyOtpRequest(email = email.trim(), token = token.trim(), type = "signup"))
-                if (fallbackResponse.isSuccessful) {
-                    response = fallbackResponse
-                }
-            }
+            val formattedPhone = formatPhoneWithCountryCode(phone)
+            // Call verifyOtp with type = 'sms'
+            val response = api.verifyOtp(
+                VerifyOtpRequest(
+                    phone = formattedPhone,
+                    token = token.trim(),
+                    type = "sms"
+                )
+            )
 
             if (response.isSuccessful) {
                 val body = response.body()
@@ -678,18 +1037,93 @@ class VendorRepository(
                         sessionManager.accessToken = body.accessToken
                         sessionManager.refreshToken = body.refreshToken
                         sessionManager.userId = body.user.id
-                        sessionManager.userEmail = body.user.email ?: email
+                        sessionManager.userEmail = body.user.phone ?: formattedPhone
                     }
                     Resource.Success(body)
                 } else {
                     Resource.Error("OTP verification succeeded but no user data returned")
                 }
             } else {
-                val err = response.errorBody()?.string()
-                Resource.Error(err ?: "Invalid or expired OTP code", response.code())
+                val err = extractErrorMessage(response, "OTP verification failed")
+                Resource.Error(err, response.code())
             }
         } catch (e: Exception) {
             Resource.Error(e.localizedMessage ?: "Network error during OTP verification")
+        }
+    }
+
+    private fun formatPhoneWithCountryCode(phone: String): String {
+        val digitsOnly = phone.trim().filter { it.isDigit() }
+        return when {
+            digitsOnly.length == 10 -> "+91$digitsOnly"
+            digitsOnly.startsWith("91") && digitsOnly.length == 12 -> "+$digitsOnly"
+            phone.trim().startsWith("+") -> phone.trim()
+            else -> "+91$digitsOnly"
+        }
+    }
+
+    suspend fun signUp(email: String, pass: String): Resource<AuthResponse> = withContext(Dispatchers.IO) {
+        if (email.contains("@")) {
+            try {
+                val response = api.signUp(SignUpRequest(email = email.trim(), password = pass))
+                if (response.isSuccessful) {
+                    val body = response.body()
+                    if (body != null) {
+                        if (body.accessToken != null && body.user != null) {
+                            sessionManager.accessToken = body.accessToken
+                            sessionManager.refreshToken = body.refreshToken
+                            sessionManager.userId = body.user.id
+                            sessionManager.userEmail = body.user.email ?: email.trim()
+                        }
+                        Resource.Success(body)
+                    } else {
+                        Resource.Error("Sign up response was empty")
+                    }
+                } else {
+                    val err = extractErrorMessage(response, "Sign up failed")
+                    Resource.Error(err, response.code())
+                }
+            } catch (e: Exception) {
+                Resource.Error(e.localizedMessage ?: "Network error during sign up")
+            }
+        } else {
+            signUpWithPhone(email, pass)
+        }
+    }
+
+    suspend fun verifyOtp(identifier: String, token: String): Resource<AuthResponse> = withContext(Dispatchers.IO) {
+        if (!identifier.contains("@")) {
+            verifyPhoneOtp(identifier, token)
+        } else {
+            try {
+                var response = api.verifyOtp(VerifyOtpRequest(email = identifier.trim(), token = token.trim(), type = "email"))
+                if (!response.isSuccessful) {
+                    val fallbackResponse = api.verifyOtp(VerifyOtpRequest(email = identifier.trim(), token = token.trim(), type = "signup"))
+                    if (fallbackResponse.isSuccessful) {
+                        response = fallbackResponse
+                    }
+                }
+
+                if (response.isSuccessful) {
+                    val body = response.body()
+                    if (body?.user != null) {
+                        if (body.accessToken != null) {
+                            sessionManager.accessToken = body.accessToken
+                            sessionManager.refreshToken = body.refreshToken
+                            sessionManager.userId = body.user.id
+                            sessionManager.userEmail = body.user.email ?: identifier.trim()
+                        }
+                        Resource.Success(body)
+                    } else {
+                        Resource.Error("OTP verification succeeded but no user data returned")
+                    }
+                } else {
+                    val err = extractErrorMessage(response, "OTP verification failed")
+                    Resource.Error(err, response.code())
+                }
+            } catch (e: Exception) {
+                Resource.Error(e.localizedMessage ?: "Network error during OTP verification")
+            }
         }
     }
 
@@ -709,6 +1143,15 @@ class VendorRepository(
         mimeType: String
     ): Resource<String> = withContext(Dispatchers.IO) {
         uploadPublicImage("product-images", vendorId, fileName, fileBytes, mimeType)
+    }
+
+    suspend fun uploadStoreBanner(
+        vendorId: String,
+        fileName: String,
+        fileBytes: ByteArray,
+        mimeType: String
+    ): Resource<String> = withContext(Dispatchers.IO) {
+        uploadPublicImage("restaurant-images", vendorId, fileName, fileBytes, mimeType)
     }
 
     suspend fun uploadPublicImage(
@@ -733,8 +1176,8 @@ class VendorRepository(
                 val publicUrl = "${cleanBase}storage/v1/object/public/$bucketName/$relativePath"
                 Resource.Success(publicUrl)
             } else {
-                val err = response.errorBody()?.string()
-                Resource.Error("Upload failed: ${err ?: response.message()}", response.code())
+                val err = extractErrorMessage(response, "Upload failed")
+                Resource.Error(err, response.code())
             }
         } catch (e: Exception) {
             Resource.Error(e.localizedMessage ?: "Error uploading image to $bucketName")
@@ -748,24 +1191,50 @@ class VendorRepository(
         mimeType: String
     ): Resource<String> = withContext(Dispatchers.IO) {
         try {
-            val relativePath = "$userId/$fileName"
+            val effectiveUserId = if (userId.isNotBlank() && userId != "user") {
+                userId.trim()
+            } else {
+                sessionManager.userId ?: run {
+                    val authRes = api.getAuthUser()
+                    if (authRes.isSuccessful && authRes.body() != null) authRes.body()!!.id else ""
+                }
+            }
+
+            if (effectiveUserId.isBlank()) {
+                val err = "Cannot upload KYC document: Authenticated user ID is missing. Please verify OTP first."
+                android.util.Log.e("VendorRepository", err)
+                return@withContext Resource.Error(err)
+            }
+
+            val relativePath = "$effectiveUserId/$fileName"
+            android.util.Log.d("VendorRepository", "Uploading KYC document to storage: path=$relativePath, size=${fileBytes.size}, mime=$mimeType")
+
             val requestBody = fileBytes.toRequestBody(mimeType.toMediaTypeOrNull())
             val response = api.uploadKycDocument(
                 path = relativePath,
                 fileBytes = requestBody,
-                contentType = mimeType
+                contentType = mimeType,
+                upsert = "true"
             )
             if (response.isSuccessful) {
-                // Storage path in bucket (e.g. userId/food-license-12345.jpg)
-                val fullPath = response.body()?.key ?: relativePath
-                Resource.Success(fullPath)
+                // Return clean storage path within bucket (e.g. userId/food-license-12345.jpg)
+                val rawKey = response.body()?.key ?: relativePath
+                val cleanPath = if (rawKey.startsWith("vendor-kyc-documents/")) {
+                    rawKey.removePrefix("vendor-kyc-documents/")
+                } else {
+                    rawKey
+                }
+                android.util.Log.d("VendorRepository", "KYC doc uploaded successfully: $cleanPath")
+                Resource.Success(cleanPath)
             } else {
-                val err = response.errorBody()?.string()
-                // If it already exists or returns path
-                Resource.Error("Upload failed: ${err ?: response.message()}", response.code())
+                val err = extractErrorMessage(response, "KYC Storage upload failed")
+                android.util.Log.e("VendorRepository", "Supabase storage upload error: $err (code: ${response.code()})")
+                Resource.Error(err, response.code())
             }
         } catch (e: Exception) {
-            Resource.Error(e.localizedMessage ?: "Error uploading KYC document")
+            val errorMsg = "KYC upload exception: ${e.localizedMessage ?: e.javaClass.simpleName}"
+            android.util.Log.e("VendorRepository", errorMsg, e)
+            Resource.Error(errorMsg)
         }
     }
 
@@ -784,6 +1253,149 @@ class VendorRepository(
             }
         } catch (e: Exception) {
             Resource.Error(e.localizedMessage ?: "Error getting document link")
+        }
+    }
+
+    suspend fun submitVendorRegistrationWithPaths(
+        userId: String,
+        ownerName: String,
+        hotelName: String,
+        phone: String,
+        cityId: String,
+        address: String,
+        latitude: Double?,
+        longitude: Double?,
+        openingTime: String,
+        closingTime: String,
+        email: String,
+        foodLicensePath: String?,
+        aadharPath: String?
+    ): Resource<Vendor> = withContext(Dispatchers.IO) {
+        try {
+            // 1. Resolve authentic user.id
+            val effectiveUserId = if (userId.isNotBlank() && userId != "user") {
+                userId.trim()
+            } else {
+                sessionManager.userId ?: run {
+                    val authRes = api.getAuthUser()
+                    if (authRes.isSuccessful && authRes.body() != null) authRes.body()!!.id else ""
+                }
+            }
+
+            if (effectiveUserId.isBlank()) {
+                val err = "Active authenticated session not found. Please verify your mobile number with OTP first."
+                android.util.Log.e("VendorRepository", err)
+                return@withContext Resource.Error(err)
+            }
+
+            // 2. Validate all required fields
+            if (hotelName.trim().isBlank()) {
+                return@withContext Resource.Error("Hotel / Restaurant Name is required.")
+            }
+            if (ownerName.trim().isBlank()) {
+                return@withContext Resource.Error("Owner Name is required.")
+            }
+            if (phone.trim().isBlank()) {
+                return@withContext Resource.Error("Mobile Number is required.")
+            }
+            if (cityId.trim().isBlank() || cityId == "city_default") {
+                return@withContext Resource.Error("A valid City must be selected.")
+            }
+            val isValidCityUuid = try {
+                UUID.fromString(cityId.trim())
+                true
+            } catch (_: Exception) {
+                false
+            }
+            if (!isValidCityUuid) {
+                val err = "Selected City ID is not a valid UUID: '$cityId'. Please select a city from the dropdown."
+                android.util.Log.e("VendorRepository", err)
+                return@withContext Resource.Error(err)
+            }
+            if (address.trim().isBlank()) {
+                return@withContext Resource.Error("Complete Physical Address is required.")
+            }
+            if (foodLicensePath.isNullOrBlank()) {
+                val err = "Food License document URL is missing. Please ensure your Food License is uploaded."
+                android.util.Log.e("VendorRepository", err)
+                return@withContext Resource.Error(err)
+            }
+            if (aadharPath.isNullOrBlank()) {
+                val err = "Aadhar Card document URL is missing. Please ensure your Aadhar Card is uploaded."
+                android.util.Log.e("VendorRepository", err)
+                return@withContext Resource.Error(err)
+            }
+
+            // 3. Insert into vendors table FIRST (strictly adhering to user prompt)
+            val vendorBody = mutableMapOf<String, Any?>(
+                "user_id" to effectiveUserId,
+                "name" to hotelName.trim(),
+                "owner_name" to ownerName.trim(),
+                "phone" to phone.trim(),
+                "city_id" to cityId.trim(),
+                "address" to address.trim(),
+                "opening_time" to openingTime.trim().ifBlank { "09:00" },
+                "closing_time" to closingTime.trim().ifBlank { "22:00" },
+                "vendor_type" to "hotel",
+                "food_license_url" to foodLicensePath.trim(),
+                "aadhar_document_url" to aadharPath.trim(),
+                "approval_status" to "pending"
+            )
+            if (latitude != null) vendorBody["latitude"] = latitude
+            if (longitude != null) vendorBody["longitude"] = longitude
+            if (email.trim().isNotBlank()) vendorBody["email"] = email.trim()
+
+            android.util.Log.d("VendorRepository", "Executing supabase.from('vendors').insert: $vendorBody")
+            val vendorResponse = api.insertVendor(vendorBody)
+
+            if (!vendorResponse.isSuccessful) {
+                val errorMsg = extractErrorMessage(vendorResponse, "Vendor submit error")
+                android.util.Log.e("VendorRepository", "Vendor submit error: $errorMsg (code: ${vendorResponse.code()})")
+                System.err.println("Vendor submit error: $errorMsg")
+                return@withContext Resource.Error(errorMsg, vendorResponse.code())
+            }
+
+            val createdVendor = vendorResponse.body()?.firstOrNull() ?: Vendor(
+                userId = effectiveUserId,
+                name = hotelName.trim(),
+                ownerName = ownerName.trim(),
+                phone = phone.trim(),
+                cityId = cityId.trim(),
+                address = address.trim(),
+                approvalStatus = "pending"
+            )
+            android.util.Log.d("VendorRepository", "Vendor row inserted successfully: ${createdVendor.id}")
+
+            // 4. Also create/update the profiles row (only reachable after vendor insert succeeds)
+            val profileBody = mutableMapOf<String, Any?>(
+                "id" to effectiveUserId,
+                "role" to "vendor",
+                "full_name" to ownerName.trim(),
+                "phone" to phone.trim(),
+                "city_id" to cityId.trim()
+            )
+            try {
+                android.util.Log.d("VendorRepository", "Executing supabase.from('profiles').upsert: $profileBody")
+                val profileResponse = api.insertProfile(onConflict = "id", profile = profileBody)
+                if (!profileResponse.isSuccessful) {
+                    val pErr = extractErrorMessage(profileResponse, "Profile upsert error")
+                    android.util.Log.w("VendorRepository", "Profile upsert non-critical warning: $pErr")
+                } else {
+                    android.util.Log.d("VendorRepository", "Vendor profile upserted successfully")
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("VendorRepository", "Profile upsert exception: ${e.message}")
+            }
+
+            // 5. Clear session credentials so user remains in unauthenticated state
+            sessionManager.clearSession()
+
+            Resource.Success(createdVendor)
+        } catch (e: Exception) {
+            val err = "Vendor submit exception: ${e.localizedMessage ?: e.javaClass.simpleName}"
+            android.util.Log.e("VendorRepository", err, e)
+            System.err.println("Vendor submit error: $err")
+            Resource.Error(err)
         }
     }
 
@@ -833,60 +1445,22 @@ class VendorRepository(
                 }
             }
 
-            // 3. Upsert into profiles table
-            val profileBody = mutableMapOf<String, Any?>(
-                "id" to userId,
-                "role" to "vendor",
-                "full_name" to ownerName.trim(),
-                "city_id" to cityId
+            // Delegate to submitVendorRegistrationWithPaths
+            submitVendorRegistrationWithPaths(
+                userId = userId,
+                ownerName = ownerName,
+                hotelName = hotelName,
+                phone = phone,
+                cityId = cityId,
+                address = address,
+                latitude = latitude,
+                longitude = longitude,
+                openingTime = openingTime,
+                closingTime = closingTime,
+                email = email,
+                foodLicensePath = foodLicensePath,
+                aadharPath = aadharPath
             )
-            try {
-                api.insertProfile(profileBody)
-            } catch (_: Exception) {
-                // Non-fatal if profile trigger already created it or RLS requires minimal fields
-            }
-
-            // 4. Insert into vendors table with approval_status = 'pending'
-            val vendorBody = mutableMapOf<String, Any?>(
-                "user_id" to userId,
-                "name" to hotelName.trim(),
-                "owner_name" to ownerName.trim(),
-                "phone" to phone.trim(),
-                "email" to email.trim(),
-                "vendor_type" to "hotel",
-                "city_id" to cityId,
-                "address" to address.trim(),
-                "opening_time" to openingTime,
-                "closing_time" to closingTime,
-                "approval_status" to "pending",
-                "is_active" to true
-            )
-            if (latitude != null) vendorBody["latitude"] = latitude
-            if (longitude != null) vendorBody["longitude"] = longitude
-            if (!foodLicensePath.isNullOrEmpty()) vendorBody["food_license_url"] = foodLicensePath
-            if (!aadharPath.isNullOrEmpty()) vendorBody["aadhar_document_url"] = aadharPath
-
-            val vendorResponse = api.insertVendor(vendorBody)
-            if (vendorResponse.isSuccessful) {
-                val created = vendorResponse.body()?.firstOrNull() ?: Vendor(
-                    userId = userId,
-                    name = hotelName,
-                    ownerName = ownerName,
-                    phone = phone,
-                    email = email,
-                    cityId = cityId,
-                    address = address,
-                    approvalStatus = "pending"
-                )
-                // Clear active session credentials so user remains in unauthenticated state
-                // and cannot enter main dashboard until approved by City Admin
-                sessionManager.clearSession()
-
-                Resource.Success(created)
-            } else {
-                val err = vendorResponse.errorBody()?.string()
-                Resource.Error("Registration failed: ${err ?: vendorResponse.message()}", vendorResponse.code())
-            }
         } catch (e: Exception) {
             Resource.Error(e.localizedMessage ?: "Error submitting vendor registration")
         }
@@ -894,5 +1468,32 @@ class VendorRepository(
 
     fun logout() {
         sessionManager.clearSession()
+    }
+
+    // 14. App Version and Maintenance Mode Checks
+    suspend fun getAppVersionInfo(platform: String = "vendor_app"): Resource<AppVersionInfo?> = withContext(Dispatchers.IO) {
+        try {
+            val res = api.getAppVersions(platformFilter = "eq.$platform")
+            if (res.isSuccessful) {
+                Resource.Success(res.body()?.firstOrNull())
+            } else {
+                Resource.Error(extractErrorMessage(res, "Failed to check app version"), res.code())
+            }
+        } catch (e: Exception) {
+            Resource.Error(e.localizedMessage ?: "App version check error")
+        }
+    }
+
+    suspend fun getMaintenanceModeSetting(): Resource<AppSettingItem?> = withContext(Dispatchers.IO) {
+        try {
+            val res = api.getAppSettings(keyFilter = "eq.maintenance_mode")
+            if (res.isSuccessful) {
+                Resource.Success(res.body()?.firstOrNull())
+            } else {
+                Resource.Error(extractErrorMessage(res, "Failed to check maintenance mode"), res.code())
+            }
+        } catch (e: Exception) {
+            Resource.Error(e.localizedMessage ?: "Maintenance check error")
+        }
     }
 }

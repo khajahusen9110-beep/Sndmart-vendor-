@@ -299,13 +299,13 @@ fun ImageUploadDropzone(
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(16.dp),
+                            .padding(12.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Center
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(44.dp)
+                                .size(40.dp)
                                 .clip(CircleShape)
                                 .background(SpruceContainerLight),
                             contentAlignment = Alignment.Center
@@ -314,21 +314,38 @@ fun ImageUploadDropzone(
                                 imageVector = Icons.Outlined.CloudUpload,
                                 contentDescription = null,
                                 tint = SprucePrimary,
-                                modifier = Modifier.size(24.dp)
+                                modifier = Modifier.size(22.dp)
                             )
                         }
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(6.dp))
+                        FilledTonalButton(
+                            onClick = {
+                                photoPickerLauncher.launch(
+                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                )
+                            },
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.filledTonalButtonColors(
+                                containerColor = SpruceContainerLight,
+                                contentColor = SprucePrimary
+                            ),
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
+                            modifier = Modifier.height(34.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.AddPhotoAlternate,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Choose Photo", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "Tap to upload $label photo",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = Slate900
-                        )
-                        Text(
-                            text = "Opens photo picker • Up to 5MB",
+                            text = "JPG, PNG, WebP • Max 5MB",
                             style = MaterialTheme.typography.bodySmall,
                             color = Slate500,
-                            fontSize = 12.sp
+                            fontSize = 11.sp
                         )
                     }
                 }

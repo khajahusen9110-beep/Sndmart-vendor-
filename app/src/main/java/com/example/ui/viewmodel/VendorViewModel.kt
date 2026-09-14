@@ -1,6 +1,7 @@
 package com.example.ui.viewmodel
 
 import android.app.Application
+import android.os.Build
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.local.SessionManager
@@ -10,8 +11,13 @@ import com.example.data.repository.Resource
 import com.example.data.repository.VendorRepository
 import com.example.util.NotificationHelper
 import com.example.util.SoundAlertManager
+import com.google.android.gms.common.ConnectionResult
+import com.google.android.gms.common.GoogleApiAvailability
 import com.google.firebase.messaging.FirebaseMessaging
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -37,6 +43,14 @@ data class RegistrationUiState(
     val isRequestingOtp: Boolean = false,
     val isSubmittingRegistration: Boolean = false,
     val isOtpSent: Boolean = false,
+    val isOtpVerified: Boolean = false,
+    val authenticatedUserId: String? = null,
+    val isUploadingFoodLicense: Boolean = false,
+    val foodLicenseStoragePath: String? = null,
+    val foodLicenseUploadError: String? = null,
+    val isUploadingAadhar: Boolean = false,
+    val aadharStoragePath: String? = null,
+    val aadharUploadError: String? = null,
     val registeredVendor: Vendor? = null,
     val errorMessage: String? = null,
     val successMessage: String? = null
@@ -45,7 +59,8 @@ data class RegistrationUiState(
 data class DashboardUiState(
     val ordersTodayCount: Int = 0,
     val earningsTodaySum: Double = 0.0,
-    val pendingOrdersCount: Int = 0,
+    val confirmedOrdersCount: Int = 0, // Orders accepted by City Admin waiting for vendor preparation
+    val pendingOrdersCount: Int = 0, // Kept at 0: vendors never see pending orders
     val averageRating: Double = 0.0,
     val walletBalance: Double = 0.0,
     val recentOrders: List<Order> = emptyList(),
@@ -58,6 +73,10 @@ data class MenuUiState(
     val categories: List<Category> = emptyList(),
     val products: List<Product> = emptyList(),
     val selectedCategoryId: String? = null,
+    val searchQuery: String = "",
+    val page: Int = 0,
+    val canLoadMore: Boolean = true,
+    val isLoadingMore: Boolean = false,
     val isLoading: Boolean = false,
     val isSubmitting: Boolean = false,
     val errorMessage: String? = null,
@@ -68,6 +87,10 @@ data class OrdersUiState(
     val orders: List<Order> = emptyList(),
     val activeFilter: String = "ALL", // ALL, PENDING, CONFIRMED, PREPARING, READY, DELIVERED, CANCELLED
     val selectedOrder: Order? = null,
+    val searchQuery: String = "",
+    val page: Int = 0,
+    val canLoadMore: Boolean = true,
+    val isLoadingMore: Boolean = false,
     val isLoading: Boolean = false,
     val isUpdating: Boolean = false,
     val errorMessage: String? = null,
@@ -80,6 +103,9 @@ data class EarningsUiState(
     val payouts: List<Payout> = emptyList(),
     val withdrawals: List<Withdrawal> = emptyList(),
     val runningBalance: Double = 0.0,
+    val page: Int = 0,
+    val canLoadMoreTransactions: Boolean = true,
+    val isLoadingMoreTransactions: Boolean = false,
     val isLoading: Boolean = false,
     val isSubmittingWithdrawal: Boolean = false,
     val errorMessage: String? = null,
@@ -90,6 +116,9 @@ data class ReviewsUiState(
     val reviews: List<Review> = emptyList(),
     val averageRating: Double = 0.0,
     val totalCount: Int = 0,
+    val page: Int = 0,
+    val canLoadMore: Boolean = true,
+    val isLoadingMore: Boolean = false,
     val isLoading: Boolean = false,
     val errorMessage: String? = null
 )
@@ -106,12 +135,49 @@ data class ProfileUiState(
     val successMessage: String? = null
 )
 
+const val CURRENT_APP_VERSION = "1.0.0"
+
+data class BlockingUpdateState(
+    val isBlocked: Boolean = false,
+    val updateMessage: String? = null,
+    val minimumSupportedVersion: String? = null,
+    val currentAppVersion: String = CURRENT_APP_VERSION,
+    val updateUrl: String? = null
+)
+
+data class MaintenanceBannerState(
+    val isEnabled: Boolean = false,
+    val message: String? = null,
+    val isDismissedForSession: Boolean = false
+)
+
+fun compareVersions(a: String, b: String): Int {
+    val pa = a.split('.').map { it.toIntOrNull() ?: 0 }
+    val pb = b.split('.').map { it.toIntOrNull() ?: 0 }
+    for (i in 0 until 3) {
+        val valA = pa.getOrElse(i) { 0 }
+        val valB = pb.getOrElse(i) { 0 }
+        if (valA != valB) return valA - valB
+    }
+    return 0
+}
+
 class VendorViewModel(application: Application) : AndroidViewModel(application) {
 
     val sessionManager = SessionManager(application.applicationContext)
     private val supabaseClient = SupabaseClient(sessionManager)
     val repository = VendorRepository(supabaseClient, sessionManager)
     val soundAlertManager = SoundAlertManager(application.applicationContext)
+
+    private val _blockingUpdateState = MutableStateFlow(BlockingUpdateState())
+    val blockingUpdateState: StateFlow<BlockingUpdateState> = _blockingUpdateState.asStateFlow()
+
+    private val _maintenanceBannerState = MutableStateFlow(MaintenanceBannerState())
+    val maintenanceBannerState: StateFlow<MaintenanceBannerState> = _maintenanceBannerState.asStateFlow()
+
+    fun dismissMaintenanceBanner() {
+        _maintenanceBannerState.update { it.copy(isDismissedForSession = true) }
+    }
 
     private val _authUiState = MutableStateFlow<AuthUiState>(AuthUiState.Loading)
     val authUiState: StateFlow<AuthUiState> = _authUiState.asStateFlow()
@@ -142,11 +208,138 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
     val inAppOrderAlert: StateFlow<String?> = _inAppOrderAlert.asStateFlow()
     val orderAlertNotification: StateFlow<String?> get() = _inAppOrderAlert.asStateFlow()
 
+    private val _targetNavigation = MutableStateFlow<String?>(null)
+    val targetNavigation: StateFlow<String?> = _targetNavigation.asStateFlow()
+
+    private val _sessionExpiredNotice = MutableStateFlow<String?>(sessionManager.sessionExpiredMessage)
+    val sessionExpiredNotice: StateFlow<String?> = _sessionExpiredNotice.asStateFlow()
+
     private var livePollingJob: Job? = null
-    private var lastKnownPendingCount = 0
+    private var lastKnownConfirmedCount = 0
+
+    fun navigateToOrders(orderId: String? = null) {
+        setOrdersFilter("CONFIRMED")
+        _targetNavigation.value = orderId ?: "orders"
+        if (!orderId.isNullOrBlank()) {
+            val target = _ordersState.value.orders.firstOrNull { it.id == orderId }
+            if (target != null) {
+                selectOrder(target)
+            }
+        }
+    }
+
+    fun clearTargetNavigation() {
+        _targetNavigation.value = null
+    }
 
     init {
+        viewModelScope.launch {
+            sessionManager.sessionExpiredFlow.collect { reason ->
+                handleSessionExpired(reason)
+            }
+        }
+        runStartupChecks()
         checkSession()
+    }
+
+    fun runStartupChecks() {
+        viewModelScope.launch {
+            try {
+                // 1. App Version Check (Platform: vendor_app)
+                when (val versionRes = repository.getAppVersionInfo("vendor_app")) {
+                    is Resource.Success -> {
+                        val versionInfo = versionRes.data
+                        if (versionInfo != null) {
+                            val minVersion = versionInfo.minimumSupportedVersion ?: ""
+                            val isBelowMinimum = if (minVersion.isNotBlank()) {
+                                compareVersions(CURRENT_APP_VERSION, minVersion) < 0
+                            } else false
+
+                            if (isBelowMinimum || versionInfo.forceUpdate) {
+                                _blockingUpdateState.value = BlockingUpdateState(
+                                    isBlocked = true,
+                                    updateMessage = versionInfo.updateMessage,
+                                    minimumSupportedVersion = versionInfo.minimumSupportedVersion,
+                                    currentAppVersion = CURRENT_APP_VERSION,
+                                    updateUrl = versionInfo.updateUrl
+                                )
+                                return@launch
+                            } else {
+                                _blockingUpdateState.value = BlockingUpdateState(isBlocked = false)
+                            }
+                        }
+                    }
+                    is Resource.Error -> {
+                        android.util.Log.w("VendorViewModel", "Version check error: ${versionRes.message}")
+                    }
+                    Resource.Loading -> {}
+                }
+
+                // 2. Platform Maintenance Mode Check (Key: maintenance_mode)
+                when (val settingsRes = repository.getMaintenanceModeSetting()) {
+                    is Resource.Success -> {
+                        val setting = settingsRes.data
+                        if (setting?.isMaintenanceEnabled == true) {
+                            val msg = setting.maintenanceMessage?.ifBlank { null }
+                                ?: "Sndmart is temporarily paused for maintenance — new customer orders are not coming in right now."
+                            _maintenanceBannerState.update {
+                                it.copy(
+                                    isEnabled = true,
+                                    message = msg
+                                )
+                            }
+                        } else {
+                            _maintenanceBannerState.update {
+                                it.copy(isEnabled = false)
+                            }
+                        }
+                    }
+                    is Resource.Error -> {
+                        android.util.Log.w("VendorViewModel", "Maintenance check notice: ${settingsRes.message}")
+                    }
+                    Resource.Loading -> {}
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("VendorViewModel", "Startup checks exception: ${e.message}", e)
+            }
+        }
+    }
+
+    fun clearSessionExpiredNotice() {
+        sessionManager.sessionExpiredMessage = null
+        _sessionExpiredNotice.value = null
+    }
+
+    fun handleSessionExpired(reason: String = "Your session expired, please log in again") {
+        livePollingJob?.cancel()
+        sessionManager.clearSession()
+        sessionManager.sessionExpiredMessage = reason
+        _sessionExpiredNotice.value = reason
+        _authUiState.value = AuthUiState.Unauthenticated
+    }
+
+    fun onAppForegrounded() {
+        runStartupChecks()
+        if (!sessionManager.isLoggedIn) return
+        viewModelScope.launch {
+            // When returning to the app after being idle for hours,
+            // proactively validate or refresh the Supabase session before executing queries
+            when (val refreshRes = repository.validateOrRefreshSession()) {
+                is Resource.Success -> {
+                    val vendorId = currentVendorId()
+                    if (vendorId != null) {
+                        refreshActiveVendorProfile()
+                        refreshAll()
+                    }
+                }
+                is Resource.Error -> {
+                    if (refreshRes.code == 401) {
+                        handleSessionExpired("Your session expired, please log in again")
+                    }
+                }
+                Resource.Loading -> {}
+            }
+        }
     }
 
     fun checkSession() {
@@ -157,11 +350,39 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
             }
 
             _authUiState.value = AuthUiState.Loading
+
+            // Proactively refresh session if access token is expired or close to expiration
+            if (sessionManager.isTokenExpiredOrExpiringSoon() || sessionManager.accessToken.isNullOrBlank()) {
+                when (val refreshRes = repository.validateOrRefreshSession()) {
+                    is Resource.Error -> {
+                        if (refreshRes.code == 401) {
+                            handleSessionExpired("Your session expired, please log in again")
+                            return@launch
+                        }
+                    }
+                    is Resource.Success -> {}
+                    Resource.Loading -> {}
+                }
+            }
+
             when (val result = repository.fetchVendorProfile()) {
                 is Resource.Success -> {
                     processVendorStatus(result.data)
                 }
                 is Resource.Error -> {
+                    if (result.code == 401) {
+                        // Attempt one refresh attempt before failing
+                        val refreshRes = repository.validateOrRefreshSession()
+                        if (refreshRes is Resource.Success) {
+                            val retryProfile = repository.fetchVendorProfile()
+                            if (retryProfile is Resource.Success) {
+                                processVendorStatus(retryProfile.data)
+                                return@launch
+                            }
+                        }
+                        handleSessionExpired("Your session expired, please log in again")
+                        return@launch
+                    }
                     val cached = sessionManager.cachedVendor
                     if (cached != null) {
                         processVendorStatus(cached)
@@ -242,64 +463,86 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
 
     private fun currentVendorId(): String? {
         return (_authUiState.value as? AuthUiState.Authenticated)?.vendor?.id
+            ?: _profileState.value.vendor?.id
             ?: sessionManager.cachedVendor?.id
     }
 
     fun loadAllVendorData(vendorId: String) {
+        // Only load essential initial data on launch; other tabs load lazily
         loadDashboard(vendorId)
-        loadMenu(vendorId)
         loadOrders(vendorId)
-        loadEarnings(vendorId)
-        loadReviews(vendorId)
-        loadOperatingHours(vendorId)
     }
 
     fun refreshAll() {
         val vendorId = currentVendorId() ?: return
-        loadAllVendorData(vendorId)
+        loadDashboard(vendorId)
+        loadOrders(vendorId)
+        loadMenu(vendorId, forceRefresh = true)
+        loadEarnings(vendorId)
+        loadReviews(vendorId)
     }
 
     // --- Dashboard & Store Toggle ---
     fun loadDashboard(vendorId: String? = null) {
         viewModelScope.launch {
             val vId = vendorId ?: currentVendorId() ?: return@launch
-            _dashboardState.update { it.copy(isLoading = true) }
+            _dashboardState.update { it.copy(isLoading = true, errorMessage = null) }
             
-            // Orders
-            val ordersRes = repository.getOrders(vId)
-            val orders = if (ordersRes is Resource.Success) ordersRes.data else emptyList()
+            // Rule 4: Run independent requests in parallel, not one after another
+            try {
+                coroutineScope {
+                    val ordersDeferred = async { repository.getOrders(vId, limit = 20, offset = 0) }
+                    val reviewsDeferred = async { repository.getReviews(vId, limit = 20, offset = 0) }
+                    val walletDeferred = async { repository.getWalletTransactions(vId, limit = 20, offset = 0) }
 
-            // Calculate Today's stats
-            val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
-            val todayOrders = orders.filter { it.createdAt?.startsWith(todayStr) == true }
-            val ordersTodayCount = todayOrders.size
-            val earningsTodaySum = todayOrders
-                .filter { it.status.lowercase() !in listOf("cancelled", "canceled") }
-                .sumOf { it.totalAmount }
-            val pendingOrdersCount = orders.count { it.status.lowercase() == "pending" }
+                    val ordersRes = ordersDeferred.await()
+                    val reviewsRes = reviewsDeferred.await()
+                    val walletRes = walletDeferred.await()
 
-            // Reviews for average
-            val reviewsRes = repository.getReviews(vId)
-            val reviews = if (reviewsRes is Resource.Success) reviewsRes.data else emptyList()
-            val avgRating = if (reviews.isNotEmpty()) reviews.map { it.rating }.average() else 0.0
+                    if (ordersRes.code == 401 || reviewsRes.code == 401 || walletRes.code == 401) {
+                        handleSessionExpired("Your session expired, please log in again")
+                        return@coroutineScope
+                    }
 
-            // Wallet transactions for balance
-            val walletRes = repository.getWalletTransactions(vId)
-            val transactions = if (walletRes is Resource.Success) walletRes.data else emptyList()
-            val balance = transactions.sumOf {
-                if (it.type.lowercase() in listOf("debit", "withdrawal")) -it.amount else it.amount
-            }
+                    if (ordersRes is Resource.Error) {
+                        _dashboardState.update { it.copy(isLoading = false, errorMessage = ordersRes.message) }
+                        return@coroutineScope
+                    }
 
-            _dashboardState.update {
-                it.copy(
-                    ordersTodayCount = ordersTodayCount,
-                    earningsTodaySum = earningsTodaySum,
-                    pendingOrdersCount = pendingOrdersCount,
-                    averageRating = if (avgRating.isNaN()) 0.0 else avgRating,
-                    walletBalance = balance,
-                    recentOrders = orders.take(10),
-                    isLoading = false
-                )
+                    val orders = (ordersRes as Resource.Success).data
+                    val reviews = if (reviewsRes is Resource.Success) reviewsRes.data else emptyList()
+                    val avgRating = if (reviews.isNotEmpty()) reviews.map { it.rating }.average() else 0.0
+
+                    val transactions = if (walletRes is Resource.Success) walletRes.data else emptyList()
+                    val balance = transactions.sumOf {
+                        if (it.type.lowercase() in listOf("debit", "withdrawal")) -it.amount else it.amount
+                    }
+
+                    // Calculate Today's stats
+                    val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+                    val todayOrders = orders.filter { it.createdAt?.startsWith(todayStr) == true }
+                    val ordersTodayCount = todayOrders.size
+                    val earningsTodaySum = todayOrders
+                        .filter { it.status.lowercase() !in listOf("cancelled", "canceled") }
+                        .sumOf { it.totalAmount }
+                    val confirmedOrdersCount = orders.count { it.status.lowercase() == "confirmed" }
+
+                    _dashboardState.update {
+                        it.copy(
+                            ordersTodayCount = ordersTodayCount,
+                            earningsTodaySum = earningsTodaySum,
+                            confirmedOrdersCount = confirmedOrdersCount,
+                            pendingOrdersCount = 0,
+                            averageRating = if (avgRating.isNaN()) 0.0 else avgRating,
+                            walletBalance = balance,
+                            recentOrders = orders.take(10),
+                            isLoading = false,
+                            errorMessage = null
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                _dashboardState.update { it.copy(isLoading = false, errorMessage = e.localizedMessage ?: "Failed to load dashboard") }
             }
         }
     }
@@ -321,25 +564,87 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    // --- Menu ---
-    fun loadMenu(vendorId: String? = null) {
+    // --- Menu (Rule 1: Paginated 30 at a time, Rule 4: Parallel Fetching) ---
+    fun loadMenu(vendorId: String? = null, forceRefresh: Boolean = false) {
         viewModelScope.launch {
             val vId = vendorId ?: currentVendorId() ?: return@launch
             _menuState.update { it.copy(isLoading = true, errorMessage = null) }
-            val catRes = repository.getCategories(vId)
-            val prodRes = repository.getProducts(vId)
+            try {
+                coroutineScope {
+                    val catDeferred = async { repository.getCategories(vId, forceRefresh = forceRefresh) }
+                    val prodDeferred = async { repository.getProducts(vId, limit = 30, offset = 0) }
 
-            val cats = if (catRes is Resource.Success) catRes.data else emptyList()
-            val prods = if (prodRes is Resource.Success) prodRes.data else emptyList()
+                    val catRes = catDeferred.await()
+                    val prodRes = prodDeferred.await()
 
-            _menuState.update {
-                it.copy(
-                    categories = cats,
-                    products = prods,
-                    isLoading = false
-                )
+                    if (catRes.code == 401 || prodRes.code == 401) {
+                        handleSessionExpired("Your session expired, please log in again")
+                        return@coroutineScope
+                    }
+
+                    if (catRes is Resource.Error) {
+                        _menuState.update { it.copy(isLoading = false, errorMessage = catRes.message) }
+                        return@coroutineScope
+                    }
+
+                    if (prodRes is Resource.Error) {
+                        _menuState.update { it.copy(isLoading = false, errorMessage = prodRes.message) }
+                        return@coroutineScope
+                    }
+
+                    val cats = (catRes as Resource.Success).data
+                    val prods = (prodRes as Resource.Success).data
+
+                    _menuState.update {
+                        it.copy(
+                            categories = cats,
+                            products = prods,
+                            page = 0,
+                            canLoadMore = prods.size >= 30,
+                            isLoadingMore = false,
+                            isLoading = false,
+                            errorMessage = null
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                _menuState.update { it.copy(isLoading = false, errorMessage = e.localizedMessage ?: "Failed to load menu") }
             }
         }
+    }
+
+    fun loadMoreProducts() {
+        val vId = currentVendorId() ?: return
+        val currentState = _menuState.value
+        if (!currentState.canLoadMore || currentState.isLoadingMore || currentState.isLoading) return
+
+        viewModelScope.launch {
+            _menuState.update { it.copy(isLoadingMore = true) }
+            val nextPage = currentState.page + 1
+            val offset = nextPage * 30
+            when (val res = repository.getProducts(vId, limit = 30, offset = offset)) {
+                is Resource.Success -> {
+                    val newItems = res.data
+                    val combined = (currentState.products + newItems).distinctBy { it.id }
+                    _menuState.update {
+                        it.copy(
+                            products = combined,
+                            page = nextPage,
+                            canLoadMore = newItems.size >= 30,
+                            isLoadingMore = false
+                        )
+                    }
+                }
+                is Resource.Error -> {
+                    _menuState.update { it.copy(isLoadingMore = false) }
+                }
+                Resource.Loading -> {}
+            }
+        }
+    }
+
+    fun setMenuSearchQuery(query: String) {
+        _menuState.update { it.copy(searchQuery = query) }
     }
 
     fun uploadCategoryImage(
@@ -382,11 +687,38 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    fun uploadStoreBanner(
+        fileName: String,
+        fileBytes: ByteArray,
+        mimeType: String,
+        onComplete: (Boolean, String?, String?) -> Unit
+    ) {
+        val vendorId = currentVendorId()
+        if (vendorId == null) {
+            onComplete(false, null, "Vendor session missing. Please log in.")
+            return
+        }
+        viewModelScope.launch {
+            when (val res = repository.uploadStoreBanner(vendorId, fileName, fileBytes, mimeType)) {
+                is Resource.Success -> onComplete(true, res.data, null)
+                is Resource.Error -> onComplete(false, null, res.message)
+                Resource.Loading -> {}
+            }
+        }
+    }
+
     fun addCategory(name: String, imageUrl: String, onComplete: (Boolean, String?) -> Unit) {
-        val vendorId = currentVendorId() ?: return
+        val vendorId = currentVendorId()
+        if (vendorId == null) {
+            val err = "No active vendor profile found. Please re-login."
+            _menuState.update { it.copy(isSubmitting = false, errorMessage = err) }
+            onComplete(false, err)
+            return
+        }
+        val cityId = _profileState.value.vendor?.cityId ?: sessionManager.cachedVendor?.cityId
         viewModelScope.launch {
             _menuState.update { it.copy(isSubmitting = true) }
-            when (val res = repository.createCategory(vendorId, name, imageUrl)) {
+            when (val res = repository.createCategory(vendorId, name, imageUrl, cityId)) {
                 is Resource.Success -> {
                     _menuState.update { it.copy(categories = it.categories + res.data, isSubmitting = false, successMessage = "Category added successfully") }
                     onComplete(true, null)
@@ -455,14 +787,16 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
         isActive: Boolean,
         availableFrom: String?,
         availableUntil: String?,
+        stockQty: Int = 100,
+        isAvailable: Boolean = true,
         onComplete: (Boolean, String?) -> Unit
     ) {
         val vendorId = currentVendorId() ?: return
         viewModelScope.launch {
             _menuState.update { it.copy(isSubmitting = true) }
-            when (val res = repository.createProduct(vendorId, categoryId, name, description, price, imageUrl, isActive, availableFrom, availableUntil)) {
+            when (val res = repository.createProduct(vendorId, categoryId, name, description, price, imageUrl, isActive, availableFrom, availableUntil, stockQty, isAvailable)) {
                 is Resource.Success -> {
-                    _menuState.update { it.copy(products = listOf(res.data) + it.products, isSubmitting = false, successMessage = "Product added successfully") }
+                    _menuState.update { it.copy(products = listOf(res.data) + it.products, isSubmitting = false, successMessage = "Product added successfully with $stockQty stock") }
                     onComplete(true, null)
                 }
                 is Resource.Error -> {
@@ -471,6 +805,69 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
                 }
                 Resource.Loading -> {}
             }
+        }
+    }
+
+    fun quickRestockProduct(productId: String, targetStock: Int = 100, onComplete: (Boolean, String?) -> Unit = { _, _ -> }) {
+        val updates = mapOf(
+            "stock_qty" to targetStock,
+            "is_available" to true
+        )
+        updateProduct(productId, updates) { success, err ->
+            if (success) {
+                _menuState.update { it.copy(successMessage = "Restocked item to $targetStock portions") }
+            }
+            onComplete(success, err)
+        }
+    }
+
+    fun restockZeroStockProducts(targetStock: Int = 100, onComplete: (Boolean, String?) -> Unit = { _, _ -> }) {
+        val zeroItems = _menuState.value.products.filter { it.isSoldOut }
+        if (zeroItems.isEmpty()) {
+            _menuState.update { it.copy(successMessage = "All items already have stock!") }
+            onComplete(true, null)
+            return
+        }
+        viewModelScope.launch {
+            _menuState.update { it.copy(isSubmitting = true) }
+            val updates = mapOf(
+                "stock_qty" to targetStock,
+                "is_available" to true
+            )
+            val results: List<Pair<String, Resource<Product>>> = coroutineScope {
+                zeroItems.map { item ->
+                    async { item.id to repository.updateProduct(item.id, updates) }
+                }.awaitAll()
+            }
+            var successCount = 0
+            var lastError: String? = null
+            val updatedMap = mutableMapOf<String, Product>()
+            for (entry in results) {
+                val id = entry.first
+                when (val res = entry.second) {
+                    is Resource.Success<Product> -> {
+                        successCount++
+                        updatedMap[id] = res.data
+                    }
+                    is Resource.Error -> {
+                        lastError = res.message
+                    }
+                    Resource.Loading -> {}
+                }
+            }
+            if (updatedMap.isNotEmpty()) {
+                _menuState.update { s ->
+                    s.copy(products = s.products.map { p -> updatedMap[p.id] ?: p })
+                }
+            }
+            _menuState.update {
+                it.copy(
+                    isSubmitting = false,
+                    successMessage = if (successCount > 0) "Successfully restocked $successCount item(s) to $targetStock portions!" else null,
+                    errorMessage = if (successCount == 0) lastError else null
+                )
+            }
+            onComplete(successCount > 0, lastError)
         }
     }
 
@@ -540,42 +937,87 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    // --- Orders ---
+    // --- Orders (Rule 1: Paginated 20 at a time) ---
     fun loadOrders(vendorId: String? = null) {
         viewModelScope.launch {
             val vId = vendorId ?: currentVendorId() ?: return@launch
             _ordersState.update { it.copy(isLoading = true, errorMessage = null) }
-            when (val res = repository.getOrders(vId)) {
+            when (val res = repository.getOrders(vId, limit = 20, offset = 0)) {
                 is Resource.Success -> {
-                    val pendingOrders = res.data.filter { it.status.lowercase() == "pending" }
-                    val pendingCount = pendingOrders.size
-                    if (pendingCount > 0 && (pendingCount > lastKnownPendingCount || lastKnownPendingCount == 0)) {
-                        _inAppOrderAlert.value = "🛎️ New incoming order! Pending confirmation."
+                    val confirmedOrders = res.data.filter { it.status.lowercase() == "confirmed" }
+                    val confirmedCount = confirmedOrders.size
+                    if (confirmedCount > 0 && (confirmedCount > lastKnownConfirmedCount || lastKnownConfirmedCount == 0)) {
+                        _inAppOrderAlert.value = "🛎️ New Order - Please Prepare!"
                         soundAlertManager.startRepeatingOrderAlert(
                             scope = viewModelScope,
                             isSoundEnabled = { sessionManager.isSoundAlertEnabled },
-                            hasPendingOrders = { _ordersState.value.orders.any { it.status.lowercase() == "pending" } }
+                            hasPendingOrders = { _ordersState.value.orders.any { it.status.lowercase() == "confirmed" } }
                         )
-                    } else if (pendingCount == 0) {
+                    } else if (confirmedCount == 0) {
                         soundAlertManager.stopRepeatingAlert()
                     }
-                    lastKnownPendingCount = pendingCount
+                    lastKnownConfirmedCount = confirmedCount
 
                     _ordersState.update {
-                        it.copy(orders = res.data, isLoading = false)
+                        it.copy(
+                            orders = res.data,
+                            page = 0,
+                            canLoadMore = res.data.size >= 20,
+                            isLoadingMore = false,
+                            isLoading = false,
+                            errorMessage = null
+                        )
                     }
                 }
                 is Resource.Error -> {
-                    _ordersState.update { it.copy(isLoading = false, errorMessage = res.message) }
+                    if (res.code == 401) {
+                        handleSessionExpired("Your session expired, please log in again")
+                    } else {
+                        _ordersState.update { it.copy(isLoading = false, errorMessage = res.message) }
+                    }
                 }
                 Resource.Loading -> {}
             }
         }
     }
 
+    fun loadMoreOrders() {
+        val vId = currentVendorId() ?: return
+        val currentState = _ordersState.value
+        if (!currentState.canLoadMore || currentState.isLoadingMore || currentState.isLoading) return
+
+        viewModelScope.launch {
+            _ordersState.update { it.copy(isLoadingMore = true) }
+            val nextPage = currentState.page + 1
+            val offset = nextPage * 20
+            when (val res = repository.getOrders(vId, limit = 20, offset = offset)) {
+                is Resource.Success -> {
+                    val newItems = res.data
+                    val combined = (currentState.orders + newItems).distinctBy { it.id }
+                    _ordersState.update {
+                        it.copy(
+                            orders = combined,
+                            page = nextPage,
+                            canLoadMore = newItems.size >= 20,
+                            isLoadingMore = false
+                        )
+                    }
+                }
+                is Resource.Error -> {
+                    _ordersState.update { it.copy(isLoadingMore = false) }
+                }
+                Resource.Loading -> {}
+            }
+        }
+    }
+
+    fun setOrdersSearchQuery(query: String) {
+        _ordersState.update { it.copy(searchQuery = query) }
+    }
+
     fun selectOrder(order: Order?) {
         _ordersState.update { it.copy(selectedOrder = order) }
-        if (order?.status?.lowercase() == "pending") {
+        if (order?.status?.lowercase() in listOf("confirmed", "preparing")) {
             soundAlertManager.stopRepeatingAlert()
         }
     }
@@ -622,31 +1064,93 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    // --- Earnings & Withdrawals ---
+    // --- Earnings & Withdrawals (Rule 1: Paginated 20 at a time, Rule 4: Parallel Fetching) ---
     fun loadEarnings(vendorId: String? = null) {
         viewModelScope.launch {
             val vId = vendorId ?: currentVendorId() ?: return@launch
             _earningsState.update { it.copy(isLoading = true, errorMessage = null) }
-            val txRes = repository.getWalletTransactions(vId)
-            val payRes = repository.getPayouts(vId)
-            val withRes = repository.getWithdrawals(vId)
+            try {
+                coroutineScope {
+                    val txDeferred = async { repository.getWalletTransactions(vId, limit = 20, offset = 0) }
+                    val payDeferred = async { repository.getPayouts(vId, limit = 20, offset = 0) }
+                    val withDeferred = async { repository.getWithdrawals(vId, limit = 20, offset = 0) }
 
-            val txs = if (txRes is Resource.Success) txRes.data else emptyList()
-            val pays = if (payRes is Resource.Success) payRes.data else emptyList()
-            val withs = if (withRes is Resource.Success) withRes.data else emptyList()
+                    val txRes = txDeferred.await()
+                    val payRes = payDeferred.await()
+                    val withRes = withDeferred.await()
 
-            val balance = txs.sumOf {
-                if (it.type.lowercase() in listOf("debit", "withdrawal")) -it.amount else it.amount
+                    if (txRes.code == 401 || payRes.code == 401 || withRes.code == 401) {
+                        handleSessionExpired("Your session expired, please log in again")
+                        return@coroutineScope
+                    }
+
+                    if (txRes is Resource.Error) {
+                        _earningsState.update { it.copy(isLoading = false, errorMessage = txRes.message) }
+                        return@coroutineScope
+                    }
+                    if (payRes is Resource.Error) {
+                        _earningsState.update { it.copy(isLoading = false, errorMessage = payRes.message) }
+                        return@coroutineScope
+                    }
+                    if (withRes is Resource.Error) {
+                        _earningsState.update { it.copy(isLoading = false, errorMessage = withRes.message) }
+                        return@coroutineScope
+                    }
+
+                    val txs = (txRes as Resource.Success).data
+                    val pays = (payRes as Resource.Success).data
+                    val withs = (withRes as Resource.Success).data
+
+                    val balance = txs.sumOf {
+                        if (it.type.lowercase() in listOf("debit", "withdrawal")) -it.amount else it.amount
+                    }
+
+                    _earningsState.update {
+                        it.copy(
+                            walletTransactions = txs,
+                            payouts = pays,
+                            withdrawals = withs,
+                            runningBalance = balance,
+                            page = 0,
+                            canLoadMoreTransactions = txs.size >= 20,
+                            isLoadingMoreTransactions = false,
+                            isLoading = false,
+                            errorMessage = null
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                _earningsState.update { it.copy(isLoading = false, errorMessage = e.localizedMessage ?: "Failed to load earnings") }
             }
+        }
+    }
 
-            _earningsState.update {
-                it.copy(
-                    walletTransactions = txs,
-                    payouts = pays,
-                    withdrawals = withs,
-                    runningBalance = balance,
-                    isLoading = false
-                )
+    fun loadMoreTransactions() {
+        val vId = currentVendorId() ?: return
+        val currentState = _earningsState.value
+        if (!currentState.canLoadMoreTransactions || currentState.isLoadingMoreTransactions || currentState.isLoading) return
+
+        viewModelScope.launch {
+            _earningsState.update { it.copy(isLoadingMoreTransactions = true) }
+            val nextPage = currentState.page + 1
+            val offset = nextPage * 20
+            when (val res = repository.getWalletTransactions(vId, limit = 20, offset = offset)) {
+                is Resource.Success -> {
+                    val newItems = res.data
+                    val combined = (currentState.walletTransactions + newItems).distinctBy { it.id }
+                    _earningsState.update {
+                        it.copy(
+                            walletTransactions = combined,
+                            page = nextPage,
+                            canLoadMoreTransactions = newItems.size >= 20,
+                            isLoadingMoreTransactions = false
+                        )
+                    }
+                }
+                is Resource.Error -> {
+                    _earningsState.update { it.copy(isLoadingMoreTransactions = false) }
+                }
+                Resource.Loading -> {}
             }
         }
     }
@@ -655,7 +1159,7 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
         val vendor = (_authUiState.value as? AuthUiState.Authenticated)?.vendor
             ?: sessionManager.cachedVendor ?: return
         viewModelScope.launch {
-            _earningsState.update { it.copy(isSubmittingWithdrawal = true) }
+            _earningsState.update { it.copy(isSubmittingWithdrawal = true, errorMessage = null) }
             when (val res = repository.requestWithdrawal(vendor.id, vendor.cityId, amount, note)) {
                 is Resource.Success -> {
                     _earningsState.update {
@@ -665,6 +1169,7 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
                             successMessage = "Withdrawal request submitted for approval"
                         )
                     }
+                    loadEarnings(vendor.id)
                     onComplete(true, null)
                 }
                 is Resource.Error -> {
@@ -676,12 +1181,12 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    // --- Reviews ---
+    // --- Reviews (Rule 1: Paginated 20 at a time) ---
     fun loadReviews(vendorId: String? = null) {
         viewModelScope.launch {
             val vId = vendorId ?: currentVendorId() ?: return@launch
             _reviewsState.update { it.copy(isLoading = true, errorMessage = null) }
-            when (val res = repository.getReviews(vId)) {
+            when (val res = repository.getReviews(vId, limit = 20, offset = 0)) {
                 is Resource.Success -> {
                     val reviews = res.data
                     val avg = if (reviews.isNotEmpty()) reviews.map { it.rating }.average() else 0.0
@@ -690,12 +1195,52 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
                             reviews = reviews,
                             averageRating = if (avg.isNaN()) 0.0 else avg,
                             totalCount = reviews.size,
-                            isLoading = false
+                            page = 0,
+                            canLoadMore = reviews.size >= 20,
+                            isLoadingMore = false,
+                            isLoading = false,
+                            errorMessage = null
                         )
                     }
                 }
                 is Resource.Error -> {
-                    _reviewsState.update { it.copy(isLoading = false, errorMessage = res.message) }
+                    if (res.code == 401) {
+                        handleSessionExpired("Your session expired, please log in again")
+                    } else {
+                        _reviewsState.update { it.copy(isLoading = false, errorMessage = res.message) }
+                    }
+                }
+                Resource.Loading -> {}
+            }
+        }
+    }
+
+    fun loadMoreReviews() {
+        val vId = currentVendorId() ?: return
+        val currentState = _reviewsState.value
+        if (!currentState.canLoadMore || currentState.isLoadingMore || currentState.isLoading) return
+
+        viewModelScope.launch {
+            _reviewsState.update { it.copy(isLoadingMore = true) }
+            val nextPage = currentState.page + 1
+            val offset = nextPage * 20
+            when (val res = repository.getReviews(vId, limit = 20, offset = offset)) {
+                is Resource.Success -> {
+                    val newItems = res.data
+                    val combined = (currentState.reviews + newItems).distinctBy { it.id }
+                    val avg = if (combined.isNotEmpty()) combined.map { it.rating }.average() else 0.0
+                    _reviewsState.update {
+                        it.copy(
+                            reviews = combined,
+                            averageRating = if (avg.isNaN()) 0.0 else avg,
+                            page = nextPage,
+                            canLoadMore = newItems.size >= 20,
+                            isLoadingMore = false
+                        )
+                    }
+                }
+                is Resource.Error -> {
+                    _reviewsState.update { it.copy(isLoadingMore = false) }
                 }
                 Resource.Loading -> {}
             }
@@ -703,6 +1248,26 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     // --- Store Profile & Operating Hours ---
+    fun loadProfile() {
+        viewModelScope.launch {
+            _profileState.update { it.copy(isLoading = true, errorMessage = null) }
+            when (val res = repository.fetchVendorProfile()) {
+                is Resource.Success -> {
+                    _profileState.update { it.copy(vendor = res.data, isLoading = false, errorMessage = null) }
+                    _authUiState.value = AuthUiState.Authenticated(res.data)
+                }
+                is Resource.Error -> {
+                    if (res.code == 401) {
+                        handleSessionExpired("Your session expired, please log in again")
+                    } else {
+                        _profileState.update { it.copy(isLoading = false, errorMessage = res.message) }
+                    }
+                }
+                Resource.Loading -> {}
+            }
+        }
+    }
+
     fun updateVendorProfile(
         name: String,
         ownerName: String?,
@@ -713,9 +1278,10 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
         openingTime: String?,
         closingTime: String?,
         bannerUrl: String?,
+        cityId: String? = null,
         onComplete: (Boolean, String?) -> Unit
     ) {
-        updateStoreProfile(name, ownerName, phone, address, latitude, longitude, openingTime, closingTime, bannerUrl, onComplete)
+        updateStoreProfile(name, ownerName, phone, address, latitude, longitude, openingTime, closingTime, bannerUrl, cityId, onComplete)
     }
 
     fun updateStoreProfile(
@@ -728,19 +1294,38 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
         openingTime: String?,
         closingTime: String?,
         bannerUrl: String?,
+        cityId: String? = null,
         onComplete: (Boolean, String?) -> Unit
     ) {
         val vendorId = currentVendorId() ?: return
         viewModelScope.launch {
-            _profileState.update { it.copy(isSaving = true) }
-            when (val res = repository.updateStoreProfile(vendorId, name, ownerName, phone, address, latitude, longitude, openingTime, closingTime, bannerUrl)) {
+            _profileState.update { it.copy(isSaving = true, errorMessage = null, successMessage = null) }
+
+            // Ensure vendor's current city_id is carried over, never null
+            val resolvedCityId = cityId?.ifBlank { null }
+                ?: _profileState.value.vendor?.cityId
+                ?: sessionManager.cachedVendor?.cityId
+
+            when (val res = repository.updateStoreProfile(
+                vendorId = vendorId,
+                name = name,
+                ownerName = ownerName,
+                phone = phone,
+                address = address,
+                latitude = latitude,
+                longitude = longitude,
+                openingTime = openingTime,
+                closingTime = closingTime,
+                bannerUrl = bannerUrl,
+                cityId = resolvedCityId
+            )) {
                 is Resource.Success -> {
-                    _profileState.update { it.copy(vendor = res.data, isSaving = false, successMessage = "Store profile updated successfully") }
+                    _profileState.update { it.copy(vendor = res.data, isSaving = false, successMessage = "Store profile updated successfully", errorMessage = null) }
                     _authUiState.value = AuthUiState.Authenticated(res.data)
                     onComplete(true, null)
                 }
                 is Resource.Error -> {
-                    _profileState.update { it.copy(isSaving = false, errorMessage = res.message) }
+                    _profileState.update { it.copy(isSaving = false, errorMessage = res.message, successMessage = null) }
                     onComplete(false, res.message)
                 }
                 Resource.Loading -> {}
@@ -767,14 +1352,23 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
         dayOfWeek: String? = null,
         onComplete: (Boolean, String?) -> Unit = { _, _ -> }
     ) {
-        val vendorId = currentVendorId() ?: return
+        val vendorId = currentVendorId()
+        if (vendorId.isNullOrBlank()) {
+            val errMsg = "Active vendor profile not found. Please ensure you are logged in."
+            _profileState.update { it.copy(errorMessage = errMsg) }
+            onComplete(false, errMsg)
+            return
+        }
         viewModelScope.launch {
-            when (val res = repository.addOperatingHour(vendorId, dayOfWeek, startTime, endTime, isActive, isClosed)) {
+            _profileState.update { it.copy(errorMessage = null) }
+            when (val res = repository.addOperatingHour(vendorId, startTime, endTime, isActive)) {
                 is Resource.Success -> {
-                    _profileState.update { it.copy(operatingHours = it.operatingHours + res.data, successMessage = "Operating hour slot added") }
+                    val saved = if (dayOfWeek != null) res.data.copy(dayOfWeek = dayOfWeek) else res.data
+                    _profileState.update { it.copy(operatingHours = it.operatingHours + saved, successMessage = "Operating hour slot added") }
                     onComplete(true, null)
                 }
                 is Resource.Error -> {
+                    android.util.Log.e("VendorViewModel", "Add operating hour error: ${res.message}")
                     _profileState.update { it.copy(errorMessage = res.message) }
                     onComplete(false, res.message)
                 }
@@ -793,17 +1387,20 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
         onComplete: (Boolean, String?) -> Unit = { _, _ -> }
     ) {
         viewModelScope.launch {
-            when (val res = repository.updateOperatingHour(id, startTime, endTime, isActive, isClosed, dayOfWeek)) {
+            _profileState.update { it.copy(errorMessage = null) }
+            when (val res = repository.updateOperatingHour(id, startTime, endTime, isActive)) {
                 is Resource.Success -> {
+                    val saved = if (dayOfWeek != null) res.data.copy(dayOfWeek = dayOfWeek) else res.data
                     _profileState.update {
                         it.copy(
-                            operatingHours = it.operatingHours.map { h -> if (h.id == id) res.data else h },
+                            operatingHours = it.operatingHours.map { h -> if (h.id == id) saved else h },
                             successMessage = "Operating hour slot updated"
                         )
                     }
                     onComplete(true, null)
                 }
                 is Resource.Error -> {
+                    android.util.Log.e("VendorViewModel", "Update operating hour error: ${res.message}")
                     _profileState.update { it.copy(errorMessage = res.message) }
                     onComplete(false, res.message)
                 }
@@ -849,8 +1446,47 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     // --- FCM Push Notification Registration ---
+    private fun isEmulatorOrPlayServicesUnavailable(): Boolean {
+        val isEmulator = (Build.FINGERPRINT.startsWith("generic")
+                || Build.FINGERPRINT.startsWith("unknown")
+                || Build.MODEL.contains("google_sdk")
+                || Build.MODEL.contains("Emulator")
+                || Build.MODEL.contains("Android SDK built for x86")
+                || Build.MANUFACTURER.contains("Genymotion")
+                || (Build.BRAND.startsWith("generic") && Build.DEVICE.startsWith("generic"))
+                || "google_sdk" == Build.PRODUCT
+                || Build.HARDWARE.contains("goldfish")
+                || Build.HARDWARE.contains("ranchu"))
+
+        if (isEmulator) return true
+
+        return try {
+            val code = GoogleApiAvailability.getInstance().isGooglePlayServicesAvailable(getApplication())
+            code != ConnectionResult.SUCCESS
+        } catch (_: Throwable) {
+            true
+        }
+    }
+
     private fun registerClientFcmToken(vendor: Vendor) {
         val email = sessionManager.userEmail ?: "${vendor.id}@sndmart.vendor"
+
+        // Prevent attempting FCM registration on emulators or when Play Services is unavailable
+        if (isEmulatorOrPlayServicesUnavailable()) {
+            android.util.Log.i("VendorViewModel", "Running on emulator/streaming environment or Google Play Services not configured for FCM. Using persistent client device token.")
+            val clientToken = sessionManager.fcmToken ?: "android_fcm_${UUID.randomUUID().toString().replace("-", "").take(16)}"
+            sessionManager.fcmToken = clientToken
+            _profileState.update { it.copy(fcmToken = clientToken) }
+
+            viewModelScope.launch {
+                when (repository.registerFcmToken(vendor.id, email, clientToken)) {
+                    is Resource.Success -> _profileState.update { it.copy(isFcmRegistered = true) }
+                    is Resource.Error -> _profileState.update { it.copy(isFcmRegistered = false) }
+                    Resource.Loading -> {}
+                }
+            }
+            return
+        }
 
         try {
             FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
@@ -858,11 +1494,11 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
                     if (task.isSuccessful && !task.result.isNullOrBlank()) {
                         task.result
                     } else {
-                        android.util.Log.w("VendorViewModel", "FCM token retrieval not available, using device client token: ${task.exception?.message}")
+                        android.util.Log.i("VendorViewModel", "FCM token retrieval not available, using device client token: ${task.exception?.message}")
                         sessionManager.fcmToken ?: "android_fcm_${UUID.randomUUID().toString().replace("-", "").take(16)}"
                     }
                 } catch (t: Throwable) {
-                    android.util.Log.w("VendorViewModel", "FCM token retrieval exception: ${t.message}")
+                    android.util.Log.i("VendorViewModel", "FCM token retrieval notice: ${t.message}")
                     sessionManager.fcmToken ?: "android_fcm_${UUID.randomUUID().toString().replace("-", "").take(16)}"
                 }
 
@@ -878,7 +1514,7 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
                 }
             }
         } catch (e: Throwable) {
-            android.util.Log.w("VendorViewModel", "FirebaseMessaging unavailable: ${e.message}")
+            android.util.Log.i("VendorViewModel", "FirebaseMessaging notice: ${e.message}")
             val fallbackToken = sessionManager.fcmToken ?: "android_fcm_${UUID.randomUUID().toString().replace("-", "").take(16)}"
             sessionManager.fcmToken = fallbackToken
             _profileState.update { it.copy(fcmToken = fallbackToken) }
@@ -960,7 +1596,7 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
 
     fun simulateNewOrderAlert() {
         simulateIncomingFullScreenOrderAlert()
-        _inAppOrderAlert.value = "🛎️ New incoming order #ORD-${(1000..9999).random()}! Please accept/prepare."
+        _inAppOrderAlert.value = "🛎️ New Order - Please Prepare! #ORD-${(1000..9999).random()}"
         if (sessionManager.isSoundAlertEnabled) {
             soundAlertManager.playNewOrderSound(vibrate = true)
         }
@@ -998,19 +1634,32 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun requestRegistrationOtp(
-        email: String,
+        identifier: String,
         pass: String,
         onResult: (Boolean, String?) -> Unit
     ) {
         viewModelScope.launch {
             _registrationState.update { it.copy(isRequestingOtp = true, errorMessage = null) }
-            when (val res = repository.signUp(email, pass)) {
+            val cleanId = identifier.trim()
+            val isPhone = !cleanId.contains("@")
+            val formattedPhone = if (isPhone) {
+                val digits = cleanId.filter { it.isDigit() }
+                if (digits.length == 10) "+91$digits" else if (digits.startsWith("91")) "+$digits" else "+91$digits"
+            } else cleanId
+
+            val res = if (isPhone) {
+                repository.signUpWithPhone(formattedPhone, pass)
+            } else {
+                repository.signUp(cleanId, pass)
+            }
+
+            when (res) {
                 is Resource.Success -> {
                     _registrationState.update {
                         it.copy(
                             isRequestingOtp = false,
                             isOtpSent = true,
-                            successMessage = "Verification code sent to $email"
+                            successMessage = if (isPhone) "SMS verification OTP sent to $formattedPhone" else "Verification code sent to $cleanId"
                         )
                     }
                     onResult(true, null)
@@ -1023,6 +1672,336 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
                         )
                     }
                     onResult(false, res.message)
+                }
+                Resource.Loading -> {}
+            }
+        }
+    }
+
+    fun verifyRegistrationOtp(
+        identifier: String,
+        token: String,
+        onResult: (Boolean, String?, String?) -> Unit = { _, _, _ -> }
+    ) {
+        viewModelScope.launch {
+            _registrationState.update { it.copy(isSubmittingRegistration = true, errorMessage = null) }
+            val cleanId = identifier.trim()
+            val isPhone = !cleanId.contains("@")
+            val formattedPhone = if (isPhone) {
+                val digits = cleanId.filter { it.isDigit() }
+                if (digits.length == 10) "+91$digits" else if (digits.startsWith("91")) "+$digits" else "+91$digits"
+            } else cleanId
+
+            val verifyRes = if (isPhone) {
+                repository.verifyPhoneOtp(formattedPhone, token)
+            } else {
+                repository.verifyOtp(cleanId, token)
+            }
+
+            when (verifyRes) {
+                is Resource.Success -> {
+                    val userId = verifyRes.data.user?.id
+                    if (!userId.isNullOrEmpty()) {
+                        _registrationState.update {
+                            it.copy(
+                                isSubmittingRegistration = false,
+                                isOtpVerified = true,
+                                authenticatedUserId = userId,
+                                successMessage = "Mobile number verified successfully! Please upload KYC documents."
+                            )
+                        }
+                        onResult(true, null, userId)
+                    } else {
+                        val err = "Verification succeeded but user ID is missing"
+                        _registrationState.update { it.copy(isSubmittingRegistration = false, errorMessage = err) }
+                        onResult(false, err, null)
+                    }
+                }
+                is Resource.Error -> {
+                    _registrationState.update {
+                        it.copy(
+                            isSubmittingRegistration = false,
+                            errorMessage = verifyRes.message
+                        )
+                    }
+                    onResult(false, verifyRes.message, null)
+                }
+                Resource.Loading -> {}
+            }
+        }
+    }
+
+    fun uploadKycDocument(
+        userId: String,
+        isFoodLicense: Boolean,
+        fileName: String,
+        bytes: ByteArray,
+        mimeType: String,
+        onResult: (Boolean, String?) -> Unit = { _, _ -> }
+    ) {
+        viewModelScope.launch {
+            if (isFoodLicense) {
+                _registrationState.update { it.copy(isUploadingFoodLicense = true, foodLicenseUploadError = null) }
+            } else {
+                _registrationState.update { it.copy(isUploadingAadhar = true, aadharUploadError = null) }
+            }
+
+            when (val res = repository.uploadKycDocument(userId, fileName, bytes, mimeType)) {
+                is Resource.Success -> {
+                    val path = res.data
+                    if (isFoodLicense) {
+                        _registrationState.update {
+                            it.copy(isUploadingFoodLicense = false, foodLicenseStoragePath = path, foodLicenseUploadError = null)
+                        }
+                    } else {
+                        _registrationState.update {
+                            it.copy(isUploadingAadhar = false, aadharStoragePath = path, aadharUploadError = null)
+                        }
+                    }
+                    onResult(true, path)
+                }
+                is Resource.Error -> {
+                    val err = res.message ?: "Document upload failed"
+                    if (isFoodLicense) {
+                        _registrationState.update {
+                            it.copy(isUploadingFoodLicense = false, foodLicenseUploadError = err)
+                        }
+                    } else {
+                        _registrationState.update {
+                            it.copy(isUploadingAadhar = false, aadharUploadError = err)
+                        }
+                    }
+                    onResult(false, err)
+                }
+                Resource.Loading -> {}
+            }
+        }
+    }
+
+    fun clearFoodLicenseUpload() {
+        _registrationState.update { it.copy(foodLicenseStoragePath = null, foodLicenseUploadError = null) }
+    }
+
+    fun clearAadharUpload() {
+        _registrationState.update { it.copy(aadharStoragePath = null, aadharUploadError = null) }
+    }
+
+    fun resetOtpSent() {
+        _registrationState.update { it.copy(isOtpSent = false, isOtpVerified = false, errorMessage = null) }
+    }
+
+    fun getEffectiveUserId(): String? {
+        return _registrationState.value.authenticatedUserId?.takeIf { it.isNotBlank() && it != "user" }
+            ?: repository.sessionManager.userId?.takeIf { it.isNotBlank() && it != "user" }
+    }
+
+    fun submitFinalRegistration(
+        ownerName: String,
+        hotelName: String,
+        phone: String,
+        cityId: String,
+        address: String,
+        latitude: Double?,
+        longitude: Double?,
+        openingTime: String,
+        closingTime: String,
+        email: String,
+        foodLicenseDoc: SelectedDocument?,
+        aadharDoc: SelectedDocument?,
+        onComplete: (Boolean, String?, Vendor?) -> Unit = { _, _, _ -> }
+    ) {
+        viewModelScope.launch {
+            _registrationState.update { it.copy(isSubmittingRegistration = true, errorMessage = null) }
+
+            // 1. Resolve authentic user ID
+            val effectiveUserId = getEffectiveUserId() ?: run {
+                when (val u = repository.getAuthenticatedUser()) {
+                    is Resource.Success -> u.data.id
+                    else -> null
+                }
+            }
+
+            if (effectiveUserId.isNullOrBlank()) {
+                val err = "Active session expired. Please verify your mobile number OTP again."
+                android.util.Log.e("VendorViewModel", err)
+                _registrationState.update { it.copy(isSubmittingRegistration = false, errorMessage = err) }
+                onComplete(false, err, null)
+                return@launch
+            }
+
+            _registrationState.update { it.copy(authenticatedUserId = effectiveUserId) }
+
+            // 2. Validate City
+            if (cityId.isBlank() || cityId == "city_default") {
+                val err = "Please select a valid City from the dropdown before submitting."
+                android.util.Log.e("VendorViewModel", err)
+                _registrationState.update { it.copy(isSubmittingRegistration = false, errorMessage = err) }
+                onComplete(false, err, null)
+                return@launch
+            }
+
+            // 3. Upload Food License if not already uploaded
+            var foodPath = _registrationState.value.foodLicenseStoragePath
+            if (foodPath.isNullOrBlank()) {
+                if (foodLicenseDoc == null) {
+                    val err = "Please select and upload your Food License document."
+                    android.util.Log.e("VendorViewModel", err)
+                    _registrationState.update { it.copy(isSubmittingRegistration = false, errorMessage = err) }
+                    onComplete(false, err, null)
+                    return@launch
+                }
+                _registrationState.update { it.copy(isUploadingFoodLicense = true, foodLicenseUploadError = null) }
+                val safeFileName = "food-license-${System.currentTimeMillis()}.${foodLicenseDoc.extension}"
+                when (val uploadRes = repository.uploadKycDocument(
+                    userId = effectiveUserId,
+                    fileName = safeFileName,
+                    fileBytes = foodLicenseDoc.bytes,
+                    mimeType = foodLicenseDoc.mimeType
+                )) {
+                    is Resource.Success -> {
+                        foodPath = uploadRes.data
+                        _registrationState.update {
+                            it.copy(isUploadingFoodLicense = false, foodLicenseStoragePath = foodPath, foodLicenseUploadError = null)
+                        }
+                    }
+                    is Resource.Error -> {
+                        val err = "Food License upload failed: ${uploadRes.message}"
+                        android.util.Log.e("VendorViewModel", err)
+                        _registrationState.update {
+                            it.copy(isUploadingFoodLicense = false, foodLicenseUploadError = uploadRes.message, errorMessage = err, isSubmittingRegistration = false)
+                        }
+                        onComplete(false, err, null)
+                        return@launch
+                    }
+                    Resource.Loading -> {}
+                }
+            }
+
+            // 4. Upload Aadhar Card if not already uploaded
+            var aadharPath = _registrationState.value.aadharStoragePath
+            if (aadharPath.isNullOrBlank()) {
+                if (aadharDoc == null) {
+                    val err = "Please select and upload your Aadhar Card document."
+                    android.util.Log.e("VendorViewModel", err)
+                    _registrationState.update { it.copy(isSubmittingRegistration = false, errorMessage = err) }
+                    onComplete(false, err, null)
+                    return@launch
+                }
+                _registrationState.update { it.copy(isUploadingAadhar = true, aadharUploadError = null) }
+                val safeFileName = "aadhar-${System.currentTimeMillis()}.${aadharDoc.extension}"
+                when (val uploadRes = repository.uploadKycDocument(
+                    userId = effectiveUserId,
+                    fileName = safeFileName,
+                    fileBytes = aadharDoc.bytes,
+                    mimeType = aadharDoc.mimeType
+                )) {
+                    is Resource.Success -> {
+                        aadharPath = uploadRes.data
+                        _registrationState.update {
+                            it.copy(isUploadingAadhar = false, aadharStoragePath = aadharPath, aadharUploadError = null)
+                        }
+                    }
+                    is Resource.Error -> {
+                        val err = "Aadhar Card upload failed: ${uploadRes.message}"
+                        android.util.Log.e("VendorViewModel", err)
+                        _registrationState.update {
+                            it.copy(isUploadingAadhar = false, aadharUploadError = uploadRes.message, errorMessage = err, isSubmittingRegistration = false)
+                        }
+                        onComplete(false, err, null)
+                        return@launch
+                    }
+                    Resource.Loading -> {}
+                }
+            }
+
+            // 5. Submit to database
+            when (val res = repository.submitVendorRegistrationWithPaths(
+                userId = effectiveUserId,
+                ownerName = ownerName,
+                hotelName = hotelName,
+                phone = phone,
+                cityId = cityId,
+                address = address,
+                latitude = latitude,
+                longitude = longitude,
+                openingTime = openingTime,
+                closingTime = closingTime,
+                email = email,
+                foodLicensePath = foodPath,
+                aadharPath = aadharPath
+            )) {
+                is Resource.Success -> {
+                    _registrationState.update {
+                        it.copy(
+                            isSubmittingRegistration = false,
+                            registeredVendor = res.data,
+                            successMessage = "Application submitted successfully",
+                            errorMessage = null
+                        )
+                    }
+                    onComplete(true, null, res.data)
+                }
+                is Resource.Error -> {
+                    android.util.Log.e("VendorViewModel", "Vendor registration error: ${res.message}")
+                    _registrationState.update {
+                        it.copy(isSubmittingRegistration = false, errorMessage = res.message)
+                    }
+                    onComplete(false, res.message, null)
+                }
+                Resource.Loading -> {}
+            }
+        }
+    }
+
+    fun submitFinalRegistration(
+        userId: String,
+        ownerName: String,
+        hotelName: String,
+        phone: String,
+        cityId: String,
+        address: String,
+        latitude: Double?,
+        longitude: Double?,
+        openingTime: String,
+        closingTime: String,
+        email: String,
+        foodLicensePath: String?,
+        aadharPath: String?,
+        onComplete: (Boolean, String?, Vendor?) -> Unit = { _, _, _ -> }
+    ) {
+        viewModelScope.launch {
+            _registrationState.update { it.copy(isSubmittingRegistration = true, errorMessage = null) }
+            when (val res = repository.submitVendorRegistrationWithPaths(
+                userId = userId,
+                ownerName = ownerName,
+                hotelName = hotelName,
+                phone = phone,
+                cityId = cityId,
+                address = address,
+                latitude = latitude,
+                longitude = longitude,
+                openingTime = openingTime,
+                closingTime = closingTime,
+                email = email,
+                foodLicensePath = foodLicensePath,
+                aadharPath = aadharPath
+            )) {
+                is Resource.Success -> {
+                    _registrationState.update {
+                        it.copy(
+                            isSubmittingRegistration = false,
+                            registeredVendor = res.data,
+                            successMessage = "Application submitted successfully"
+                        )
+                    }
+                    onComplete(true, null, res.data)
+                }
+                is Resource.Error -> {
+                    android.util.Log.e("VendorViewModel", "Vendor submit error: ${res.message}")
+                    _registrationState.update {
+                        it.copy(isSubmittingRegistration = false, errorMessage = res.message)
+                    }
+                    onComplete(false, res.message, null)
                 }
                 Resource.Loading -> {}
             }

@@ -23,6 +23,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.Order
 import com.example.data.model.Vendor
+import com.example.ui.components.DashboardStatCardSkeleton
+import com.example.ui.components.OrderCardSkeleton
 import com.example.ui.components.StatCard
 import com.example.ui.components.StatusBadge
 import com.example.ui.theme.*
@@ -54,6 +56,44 @@ fun DashboardScreen(
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        if (!state.errorMessage.isNullOrBlank()) {
+            item {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = PolishRoseLight,
+                    border = BorderStroke(1.dp, PolishRose.copy(alpha = 0.35f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Warning,
+                            contentDescription = null,
+                            tint = PolishRose,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Text(
+                            text = state.errorMessage,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = PolishRoseDark,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier.weight(1f)
+                        )
+                        OutlinedButton(
+                            onClick = onRefresh,
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("Retry", fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
+        }
+
         // 1. Store Online / Offline Status Banner
         item {
             Surface(
@@ -210,15 +250,15 @@ fun DashboardScreen(
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     StatCard(
-                        title = "Pending",
-                        value = if (state.pendingOrdersCount < 10) "0${state.pendingOrdersCount}" else state.pendingOrdersCount.toString(),
-                        subValue = if (state.pendingOrdersCount > 0) "Action needed" else "All cleared",
-                        subValueColor = PolishRoseDark,
-                        containerColor = if (state.pendingOrdersCount > 0) PolishRoseLight else PolishSurfaceLight,
-                        valueColor = if (state.pendingOrdersCount > 0) PolishRose else Slate900,
-                        borderColor = if (state.pendingOrdersCount > 0) Color(0xFFFFD5D5) else PolishBorderLight,
+                        title = "To Prepare",
+                        value = if (state.confirmedOrdersCount < 10) "0${state.confirmedOrdersCount}" else state.confirmedOrdersCount.toString(),
+                        subValue = if (state.confirmedOrdersCount > 0) "Action needed" else "All cleared",
+                        subValueColor = if (state.confirmedOrdersCount > 0) SprucePrimary else Slate400,
+                        containerColor = if (state.confirmedOrdersCount > 0) SpruceContainerLight else PolishSurfaceLight,
+                        valueColor = if (state.confirmedOrdersCount > 0) SprucePrimary else Slate900,
+                        borderColor = if (state.confirmedOrdersCount > 0) SprucePrimary.copy(alpha = 0.35f) else PolishBorderLight,
                         modifier = Modifier.weight(1f),
-                        onClick = { onNavigateToOrders("PENDING") }
+                        onClick = { onNavigateToOrders("CONFIRMED") }
                     )
                     StatCard(
                         title = "Avg Rating",
@@ -259,7 +299,11 @@ fun DashboardScreen(
         }
 
         // Recent Orders List
-        if (state.recentOrders.isEmpty()) {
+        if (state.isLoading && state.recentOrders.isEmpty()) {
+            items(2) {
+                OrderCardSkeleton()
+            }
+        } else if (state.recentOrders.isEmpty()) {
             item {
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
@@ -326,7 +370,7 @@ fun DashboardScreen(
                             }
                             Column {
                                 Text(
-                                    text = order.customerName ?: "Customer",
+                                    text = order.customer?.fullName?.takeIf { it.isNotBlank() } ?: order.customerName ?: "Guest Customer",
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 14.sp,
                                     color = Slate900

@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.ui.components.ReviewCardSkeleton
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.ReviewsUiState
 
@@ -26,6 +27,7 @@ import com.example.ui.viewmodel.ReviewsUiState
 fun ReviewsScreen(
     state: ReviewsUiState,
     onRefresh: () -> Unit,
+    onLoadMore: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     LazyColumn(
@@ -36,6 +38,44 @@ fun ReviewsScreen(
         contentPadding = PaddingValues(vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
+        if (!state.errorMessage.isNullOrBlank()) {
+            item {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = PolishRoseLight,
+                    border = BorderStroke(1.dp, PolishRose.copy(alpha = 0.35f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Warning,
+                            contentDescription = null,
+                            tint = PolishRose,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Text(
+                            text = state.errorMessage,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = PolishRoseDark,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier.weight(1f)
+                        )
+                        OutlinedButton(
+                            onClick = onRefresh,
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("Retry", fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
+        }
+
         // Average Rating Summary Header
         item {
             Surface(
@@ -129,7 +169,11 @@ fun ReviewsScreen(
         }
 
         // Reviews items
-        if (state.reviews.isEmpty()) {
+        if (state.isLoading && state.reviews.isEmpty()) {
+            items(4) {
+                ReviewCardSkeleton()
+            }
+        } else if (state.reviews.isEmpty()) {
             item {
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
@@ -145,24 +189,38 @@ fun ReviewsScreen(
                         verticalArrangement = Arrangement.Center
                     ) {
                         Icon(
-                            imageVector = Icons.Outlined.RateReview,
+                            imageVector = if (!state.errorMessage.isNullOrBlank()) Icons.Default.Warning else Icons.Outlined.RateReview,
                             contentDescription = null,
-                            tint = Slate400,
+                            tint = if (!state.errorMessage.isNullOrBlank()) PolishRose else Slate400,
                             modifier = Modifier.size(44.dp)
                         )
                         Spacer(modifier = Modifier.height(12.dp))
                         Text(
-                            text = "No reviews yet",
+                            text = if (!state.errorMessage.isNullOrBlank()) "Unable to load reviews" else "No reviews yet",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                             color = Slate900
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "Customer ratings and comments after order completion will appear here.",
+                            text = if (!state.errorMessage.isNullOrBlank()) state.errorMessage
+                            else "Customer ratings and comments after order completion will appear here.",
                             style = MaterialTheme.typography.bodySmall,
-                            color = Slate500
+                            color = Slate500,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
                         )
+                        if (!state.errorMessage.isNullOrBlank()) {
+                            Spacer(modifier = Modifier.height(14.dp))
+                            Button(
+                                onClick = onRefresh,
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = PolishRose)
+                            ) {
+                                Icon(imageVector = Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Retry Loading Reviews", fontWeight = FontWeight.Bold)
+                            }
+                        }
                     }
                 }
             }
@@ -246,6 +304,33 @@ fun ReviewsScreen(
                                 style = MaterialTheme.typography.labelSmall,
                                 color = Slate400
                             )
+                        }
+                    }
+                }
+            }
+
+            // Rule 1: Pagination footer (20 reviews at a time)
+            if (state.isLoadingMore) {
+                item {
+                    ReviewCardSkeleton()
+                }
+            } else if (state.canLoadMore) {
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        OutlinedButton(
+                            onClick = onLoadMore,
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, SprucePrimary.copy(alpha = 0.5f)),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = SprucePrimary)
+                        ) {
+                            Icon(imageVector = Icons.Default.ExpandMore, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Load More Reviews (20 more)", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                         }
                     }
                 }

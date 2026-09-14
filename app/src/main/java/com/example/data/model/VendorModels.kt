@@ -5,21 +5,24 @@ import com.squareup.moshi.JsonClass
 
 @JsonClass(generateAdapter = true)
 data class AuthRequest(
-    val email: String,
+    val email: String? = null,
+    val phone: String? = null,
     val password: String
 )
 
 @JsonClass(generateAdapter = true)
 data class SignUpRequest(
-    val email: String,
+    val email: String? = null,
+    val phone: String? = null,
     val password: String
 )
 
 @JsonClass(generateAdapter = true)
 data class VerifyOtpRequest(
-    val email: String,
+    val phone: String? = null,
+    val email: String? = null,
     val token: String,
-    val type: String = "email"
+    val type: String = "sms"
 )
 
 @JsonClass(generateAdapter = true)
@@ -72,6 +75,30 @@ data class StorageUploadResponse(
     val error: String? = null,
     val statusCode: String? = null
 )
+
+data class SelectedDocument(
+    val uriString: String? = null,
+    val fileName: String,
+    val fileSizeFormatted: String,
+    val bytes: ByteArray,
+    val extension: String,
+    val mimeType: String
+) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (javaClass != other?.javaClass) return false
+        other as SelectedDocument
+        if (fileName != other.fileName) return false
+        if (!bytes.contentEquals(other.bytes)) return false
+        return true
+    }
+
+    override fun hashCode(): Int {
+        var result = fileName.hashCode()
+        result = 31 * result + bytes.contentHashCode()
+        return result
+    }
+}
 
 @JsonClass(generateAdapter = true)
 data class Vendor(
@@ -137,6 +164,15 @@ data class Product(
     @Json(name = "available_from") val availableFrom: String? = null,
     @Json(name = "available_until") val availableUntil: String? = null,
     @Json(name = "created_at") val createdAt: String? = null
+) {
+    val effectiveStock: Int get() = stockQty ?: stockQuantity ?: 0
+    val isSoldOut: Boolean get() = effectiveStock <= 0
+}
+
+@JsonClass(generateAdapter = true)
+data class OrderCustomer(
+    @Json(name = "full_name") val fullName: String? = null,
+    val phone: String? = null
 )
 
 @JsonClass(generateAdapter = true)
@@ -148,8 +184,10 @@ data class Order(
     @Json(name = "delivery_partner_id") val deliveryPartnerId: String? = null,
     @Json(name = "address_id") val addressId: String? = null,
     @Json(name = "slot_id") val slotId: String? = null,
-    @Json(name = "customer_name") val customerName: String? = null,
-    @Json(name = "customer_phone") val customerPhone: String? = null,
+    @Json(name = "customer") val customer: OrderCustomer? = null,
+    @Json(name = "profiles") val profilesCustomer: OrderCustomer? = null,
+    @Json(name = "customer_name") val rawCustomerName: String? = null,
+    @Json(name = "customer_phone") val rawCustomerPhone: String? = null,
     @Json(name = "delivery_address") val deliveryAddress: String? = null,
     val status: String = "pending", // 'pending', 'confirmed', 'preparing', 'ready', 'out_for_delivery', 'delivered', 'cancelled', 'rejected'
     val subtotal: Double? = null,
@@ -170,7 +208,18 @@ data class Order(
     @Json(name = "city_id") val cityId: String? = null,
     @Json(name = "created_at") val createdAt: String? = null,
     @Json(name = "order_items") val orderItems: List<OrderItem>? = null
-)
+) {
+    val customerName: String?
+        get() = customer?.fullName?.takeIf { it.isNotBlank() }
+            ?: profilesCustomer?.fullName?.takeIf { it.isNotBlank() }
+            ?: rawCustomerName?.takeIf { it.isNotBlank() }
+            ?: "Guest Customer"
+
+    val customerPhone: String?
+        get() = customer?.phone?.takeIf { it.isNotBlank() }
+            ?: profilesCustomer?.phone?.takeIf { it.isNotBlank() }
+            ?: rawCustomerPhone?.takeIf { it.isNotBlank() }
+}
 
 @JsonClass(generateAdapter = true)
 data class OrderItem(
@@ -273,3 +322,30 @@ data class FcmTokenRegistration(
     @Json(name = "is_active") val isActive: Boolean = true,
     @Json(name = "firebase_project") val firebaseProject: String = "native_vendor"
 )
+
+@JsonClass(generateAdapter = true)
+data class AppVersionInfo(
+    val id: String? = null,
+    val platform: String? = null,
+    @Json(name = "minimum_supported_version") val minimumSupportedVersion: String? = null,
+    @Json(name = "current_version") val currentVersion: String? = null,
+    @Json(name = "force_update") val forceUpdate: Boolean = false,
+    @Json(name = "update_message") val updateMessage: String? = null,
+    @Json(name = "update_url") val updateUrl: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class AppSettingItem(
+    val key: String? = null,
+    val value: Map<String, Any?>? = null
+) {
+    val isMaintenanceEnabled: Boolean
+        get() {
+            val enabledVal = value?.get("enabled")
+            return (enabledVal as? Boolean) == true || enabledVal?.toString()?.equals("true", ignoreCase = true) == true
+        }
+
+    val maintenanceMessage: String?
+        get() = value?.get("message")?.toString()
+}
+

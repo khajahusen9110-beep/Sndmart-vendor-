@@ -3,9 +3,14 @@ package com.example.data.network
 import com.example.data.local.SessionManager
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
+import okhttp3.Authenticator
 import okhttp3.Interceptor
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
+import okhttp3.Route
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.moshi.MoshiConverterFactory
@@ -77,8 +82,13 @@ class SupabaseClient(private val sessionManager: SessionManager) {
             .header("Authorization", "Bearer $token")
             .header("Accept", "application/json")
 
+        val bodyContentType = original.body?.contentType()?.toString()
         if (original.header("Content-Type") == null) {
-            requestBuilder.header("Content-Type", "application/json")
+            if (bodyContentType != null) {
+                requestBuilder.header("Content-Type", bodyContentType)
+            } else {
+                requestBuilder.header("Content-Type", "application/json")
+            }
         }
 
         chain.proceed(requestBuilder.build())
@@ -88,8 +98,130 @@ class SupabaseClient(private val sessionManager: SessionManager) {
         level = HttpLoggingInterceptor.Level.BODY
     }
 
+    private val tokenAuthenticator = object : Authenticator {
+        private val lock = Any()
+
+        override fun authenticate(route: Route?, response: Response): Request? {
+            // Guard against infinite loop
+            if (responseCount(response) >= 3) {
+                return null
+            }
+
+            // Never try to re-authenticate the auth endpoints themselves
+            val path = response.request.url.encodedPath
+            if (path.contains("auth/v1/token") || path.contains("auth/v1/signup") || path.contains("auth/v1/verify")) {
+                return null
+            }
+
+            val storedRefreshToken = sessionManager.refreshToken
+            if (storedRefreshToken.isNullOrBlank()) {
+                sessionManager.notifySessionExpired("Your session expired, please log in again")
+                return null
+            }
+
+            synchronized(lock) {
+                val currentToken = sessionManager.accessToken
+                val priorTokenSent = response.request.header("Authorization")?.removePrefix("Bearer ")?.trim()
+
+                // If another concurrent request already refreshed the token, retry immediately with new token
+                if (!currentToken.isNullOrBlank() && currentToken != priorTokenSent) {
+                    val anonKey = resolveAnonKey(sessionManager)
+                    return response.request.newBuilder()
+                        .header("apikey", anonKey)
+                        .header("Authorization", "Bearer $currentToken")
+                        .build()
+                }
+
+                // Call Supabase GoTrue to refresh token
+                val refreshed = refreshTokensSynchronously(storedRefreshToken)
+                if (refreshed) {
+                    val newToken = sessionManager.accessToken ?: return null
+                    val anonKey = resolveAnonKey(sessionManager)
+                    return response.request.newBuilder()
+                        .header("apikey", anonKey)
+                        .header("Authorization", "Bearer $newToken")
+                        .build()
+                } else {
+                    return null
+                }
+            }
+        }
+    }
+
+    private fun refreshTokensSynchronously(refreshToken: String): Boolean {
+        return try {
+            val anonKey = resolveAnonKey(sessionManager)
+            val baseUrl = resolveBaseUrl()
+            val cleanBaseUrl = if (baseUrl.endsWith("/")) baseUrl else "$baseUrl/"
+            val url = "${cleanBaseUrl}auth/v1/token?grant_type=refresh_token"
+
+            val jsonBody = """{"refresh_token":"$refreshToken"}"""
+            val body = jsonBody.toRequestBody("application/json; charset=utf-8".toMediaType())
+
+            val refreshRequest = Request.Builder()
+                .url(url)
+                .post(body)
+                .header("apikey", anonKey)
+                .header("Authorization", "Bearer $anonKey")
+                .header("Content-Type", "application/json")
+                .header("Accept", "application/json")
+                .build()
+
+            val cleanClient = OkHttpClient.Builder()
+                .connectTimeout(15, TimeUnit.SECONDS)
+                .readTimeout(15, TimeUnit.SECONDS)
+                .build()
+
+            val response = cleanClient.newCall(refreshRequest).execute()
+            if (response.isSuccessful) {
+                val responseStr = response.body?.string() ?: return false
+                val json = org.json.JSONObject(responseStr)
+                val newAccessToken = json.optString("access_token")
+                val newRefreshToken = json.optString("refresh_token")
+                val expiresIn = json.optLong("expires_in", 3600L)
+                val userObj = json.optJSONObject("user")
+                val userId = userObj?.optString("id")
+
+                if (newAccessToken.isNotBlank()) {
+                    sessionManager.updateTokens(
+                        newAccessToken = newAccessToken,
+                        newRefreshToken = if (newRefreshToken.isNotBlank()) newRefreshToken else null,
+                        expiresInSeconds = expiresIn
+                    )
+                    if (!userId.isNullOrBlank()) {
+                        sessionManager.userId = userId
+                    }
+                    android.util.Log.i("SupabaseClient", "Session token auto-refreshed successfully.")
+                    return true
+                }
+            } else {
+                val code = response.code
+                val errBody = response.body?.string() ?: ""
+                android.util.Log.w("SupabaseClient", "Session refresh failed: HTTP $code - $errBody")
+                if (code == 400 || code == 401 || code == 403) {
+                    sessionManager.notifySessionExpired("Your session expired, please log in again")
+                }
+            }
+            false
+        } catch (e: Exception) {
+            android.util.Log.e("SupabaseClient", "Exception during token refresh", e)
+            false
+        }
+    }
+
+    private fun responseCount(response: Response): Int {
+        var count = 1
+        var prior = response.priorResponse
+        while (prior != null) {
+            count++
+            prior = prior.priorResponse
+        }
+        return count
+    }
+
     private val okHttpClient = OkHttpClient.Builder()
         .addInterceptor(authInterceptor)
+        .authenticator(tokenAuthenticator)
         .addInterceptor(loggingInterceptor)
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)

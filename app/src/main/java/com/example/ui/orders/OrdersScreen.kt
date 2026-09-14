@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -25,13 +26,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.Order
+import com.example.ui.components.OrderCardSkeleton
 import com.example.ui.components.StatusBadge
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.OrdersUiState
+import kotlinx.coroutines.delay
 
 val ORDER_STATUS_FILTERS = listOf(
     "ALL" to "All",
-    "PENDING" to "Pending",
     "CONFIRMED" to "Confirmed",
     "PREPARING" to "Preparing",
     "READY" to "Ready",
@@ -49,14 +51,54 @@ fun OrdersScreen(
     onSelectOrder: (Order?) -> Unit,
     onUpdateOrderStatus: (orderId: String, newStatus: String, notes: String?, cancellationReason: String?, onComplete: (Boolean, String?) -> Unit) -> Unit,
     onRefresh: () -> Unit,
+    onLoadMore: () -> Unit = {},
+    onSearchQueryChange: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     var orderToCancel by remember { mutableStateOf<Order?>(null) }
+    var localSearchText by remember { mutableStateOf(state.searchQuery) }
 
-    val filteredOrders = remember(state.orders, state.activeFilter) {
-        if (state.activeFilter == "ALL") state.orders
-        else state.orders.filter { it.status.equals(state.activeFilter, ignoreCase = true) }
+    // Rule 5: Debounce search inputs by 400ms
+    LaunchedEffect(localSearchText) {
+        if (localSearchText != state.searchQuery) {
+            delay(400)
+            onSearchQueryChange(localSearchText)
+        }
+    }
+
+    val filteredOrders = remember(state.orders, state.activeFilter, state.searchQuery) {
+        val visibleOrders = state.orders.filter { it.status.lowercase() != "pending" }
+        val byFilter = if (state.activeFilter == "ALL") visibleOrders
+        else visibleOrders.filter { it.status.equals(state.activeFilter, ignoreCase = true) }
+
+        if (state.searchQuery.isBlank()) {
+            byFilter
+        } else {
+            val q = state.searchQuery.trim().lowercase()
+            byFilter.filter { order ->
+                (order.orderNumber?.lowercase()?.contains(q) == true) ||
+                order.id.lowercase().contains(q) ||
+                (order.customerName?.lowercase()?.contains(q) == true) ||
+                (order.customerPhone?.contains(q) == true) ||
+                (order.deliveryAddress?.lowercase()?.contains(q) == true)
+            }
+        }
+    }
+
+    val listState = rememberLazyListState()
+    val shouldLoadMore = remember {
+        derivedStateOf {
+            val totalItems = listState.layoutInfo.totalItemsCount
+            val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+            totalItems > 0 && lastVisible >= totalItems - 2
+        }
+    }
+
+    LaunchedEffect(shouldLoadMore.value) {
+        if (shouldLoadMore.value && state.canLoadMore && !state.isLoadingMore && !state.isLoading) {
+            onLoadMore()
+        }
     }
 
     Column(
@@ -64,6 +106,39 @@ fun OrdersScreen(
             .fillMaxSize()
             .background(PolishBackgroundLight)
     ) {
+        // Search Input (Rule 5: Debounced 400ms)
+        Surface(
+            color = PolishSurfaceLight,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            OutlinedTextField(
+                value = localSearchText,
+                onValueChange = { localSearchText = it },
+                placeholder = { Text("Search by order #, customer, phone...", fontSize = 13.sp) },
+                leadingIcon = {
+                    Icon(imageVector = Icons.Default.Search, contentDescription = null, tint = Slate400, modifier = Modifier.size(18.dp))
+                },
+                trailingIcon = {
+                    if (localSearchText.isNotEmpty()) {
+                        IconButton(onClick = { localSearchText = "" }) {
+                            Icon(imageVector = Icons.Default.Close, contentDescription = "Clear", tint = Slate400, modifier = Modifier.size(16.dp))
+                        }
+                    }
+                },
+                singleLine = true,
+                shape = RoundedCornerShape(12.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = SprucePrimary,
+                    unfocusedBorderColor = PolishBorderLight,
+                    focusedContainerColor = PolishBackgroundLight,
+                    unfocusedContainerColor = PolishBackgroundLight
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+            )
+        }
+
         // Filter Chips Row
         Surface(
             color = PolishSurfaceLight,
@@ -77,8 +152,9 @@ fun OrdersScreen(
             ) {
                 items(ORDER_STATUS_FILTERS) { (filterKey, label) ->
                     val isSelected = state.activeFilter.equals(filterKey, ignoreCase = true)
-                    val count = if (filterKey == "ALL") state.orders.size
-                    else state.orders.count { it.status.equals(filterKey, ignoreCase = true) }
+                    val visibleOrders = state.orders.filter { it.status.lowercase() != "pending" }
+                    val count = if (filterKey == "ALL") visibleOrders.size
+                    else visibleOrders.count { it.status.equals(filterKey, ignoreCase = true) }
 
                     FilterChip(
                         selected = isSelected,
@@ -90,8 +166,8 @@ fun OrdersScreen(
                             )
                         },
                         colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = if (filterKey == "PENDING") PolishRose else SpruceContainer,
-                            selectedLabelColor = if (filterKey == "PENDING") Color.White else SpruceOnContainer,
+                            selectedContainerColor = if (filterKey == "CONFIRMED") SprucePrimary else SpruceContainer,
+                            selectedLabelColor = if (filterKey == "CONFIRMED") Color.White else SpruceOnContainer,
                             containerColor = PolishBackgroundLight,
                             labelColor = Slate700
                         ),
@@ -103,13 +179,57 @@ fun OrdersScreen(
 
         // Orders List
         LazyColumn(
+            state = listState,
             modifier = Modifier
                 .fillMaxSize()
                 .padding(horizontal = 16.dp),
             contentPadding = PaddingValues(vertical = 14.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            if (filteredOrders.isEmpty()) {
+            if (!state.errorMessage.isNullOrBlank()) {
+                item {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = PolishRoseLight,
+                        border = BorderStroke(1.dp, PolishRose.copy(alpha = 0.35f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Warning,
+                                contentDescription = null,
+                                tint = PolishRose,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Text(
+                                text = state.errorMessage,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = PolishRoseDark,
+                                fontWeight = FontWeight.Medium,
+                                modifier = Modifier.weight(1f)
+                            )
+                            OutlinedButton(
+                                onClick = onRefresh,
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text("Retry", fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Rule 7: Show skeleton loaders while initial data is fetching
+            if (state.isLoading && state.orders.isEmpty()) {
+                items(4) {
+                    OrderCardSkeleton()
+                }
+            } else if (filteredOrders.isEmpty()) {
                 item {
                     Surface(
                         modifier = Modifier.fillMaxWidth(),
@@ -125,38 +245,52 @@ fun OrdersScreen(
                             verticalArrangement = Arrangement.Center
                         ) {
                             Icon(
-                                imageVector = Icons.Outlined.ReceiptLong,
+                                imageVector = if (!state.errorMessage.isNullOrBlank()) Icons.Default.Warning else Icons.Outlined.ReceiptLong,
                                 contentDescription = null,
-                                tint = Slate400,
+                                tint = if (!state.errorMessage.isNullOrBlank()) PolishRose else Slate400,
                                 modifier = Modifier.size(48.dp)
                             )
                             Spacer(modifier = Modifier.height(12.dp))
                             Text(
-                                text = "No ${if (state.activeFilter != "ALL") state.activeFilter.lowercase() else ""} orders found",
+                                text = if (!state.errorMessage.isNullOrBlank()) "Unable to load orders"
+                                else "No ${if (state.activeFilter != "ALL") state.activeFilter.lowercase() else ""} orders found",
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
                                 color = Slate900
                             )
                             Text(
-                                text = "Orders placed by customers will appear here in real time.",
+                                text = if (!state.errorMessage.isNullOrBlank()) state.errorMessage
+                                else "Orders placed by customers will appear here in real time.",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = Slate500
+                                color = Slate500,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
                             )
+                            if (!state.errorMessage.isNullOrBlank()) {
+                                Spacer(modifier = Modifier.height(14.dp))
+                                Button(
+                                    onClick = onRefresh,
+                                    shape = RoundedCornerShape(10.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = PolishRose)
+                                ) {
+                                    Icon(imageVector = Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Retry Loading Orders", fontWeight = FontWeight.Bold)
+                                }
+                            }
                         }
                     }
                 }
             } else {
                 items(filteredOrders, key = { it.id }) { order ->
-                    val isPending = order.status.lowercase() == "pending"
-                    val isPreparing = order.status.lowercase() == "preparing"
                     val isConfirmed = order.status.lowercase() == "confirmed"
+                    val isPreparing = order.status.lowercase() == "preparing"
 
                     Surface(
                         onClick = { onSelectOrder(order) },
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(20.dp),
-                        color = if (isPending) PolishRoseLight else PolishSurfaceLight,
-                        border = BorderStroke(1.dp, if (isPending) Color(0xFFFFD5D5) else PolishBorderLight)
+                        color = if (isConfirmed) SpruceContainerLight.copy(alpha = 0.45f) else PolishSurfaceLight,
+                        border = BorderStroke(1.dp, if (isConfirmed) SprucePrimary.copy(alpha = 0.35f) else PolishBorderLight)
                     ) {
                         Column(
                             modifier = Modifier
@@ -180,13 +314,13 @@ fun OrdersScreen(
                                         fontWeight = FontWeight.Bold,
                                         color = Slate900
                                     )
-                                    if (isPending) {
+                                    if (isConfirmed) {
                                         Surface(
-                                            color = PolishRose,
+                                            color = SprucePrimary,
                                             shape = RoundedCornerShape(6.dp)
                                         ) {
                                             Text(
-                                                text = "NEW",
+                                                text = "TO PREPARE",
                                                 color = Color.White,
                                                 fontSize = 10.sp,
                                                 fontWeight = FontWeight.ExtraBold,
@@ -206,8 +340,11 @@ fun OrdersScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Column {
+                                    val customerDisplayName = order.customer?.fullName?.takeIf { it.isNotBlank() } 
+                                        ?: order.customerName 
+                                        ?: "Guest Customer"
                                     Text(
-                                        text = order.customerName ?: "Customer",
+                                        text = customerDisplayName,
                                         fontWeight = FontWeight.SemiBold,
                                         style = MaterialTheme.typography.bodyLarge,
                                         color = Slate900
@@ -230,7 +367,7 @@ fun OrdersScreen(
                             // Order items summary preview
                             if (!order.orderItems.isNullOrEmpty()) {
                                 Surface(
-                                    color = if (isPending) Color.White.copy(alpha = 0.6f) else PolishBackgroundLight,
+                                    color = PolishBackgroundLight,
                                     shape = RoundedCornerShape(10.dp),
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
@@ -261,40 +398,32 @@ fun OrdersScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 when (order.status.lowercase()) {
-                                    "pending" -> {
-                                        OutlinedButton(
-                                            onClick = { orderToCancel = order },
-                                            colors = ButtonDefaults.outlinedButtonColors(contentColor = PolishRose),
-                                            shape = RoundedCornerShape(12.dp),
-                                            modifier = Modifier.weight(1f)
-                                        ) {
-                                            Text("Reject / Cancel")
-                                        }
-                                        Button(
-                                            onClick = {
-                                                onUpdateOrderStatus(order.id, "confirmed", "Order confirmed by restaurant", null) { _, _ -> }
-                                            },
-                                            colors = ButtonDefaults.buttonColors(containerColor = SprucePrimary),
-                                            shape = RoundedCornerShape(12.dp),
-                                            modifier = Modifier.weight(1.2f)
-                                        ) {
-                                            Icon(imageVector = Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(16.dp))
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Text("Accept", fontWeight = FontWeight.Bold)
-                                        }
-                                    }
                                     "confirmed" -> {
-                                        Button(
-                                            onClick = {
-                                                onUpdateOrderStatus(order.id, "preparing", "Food is being prepared in kitchen", null) { _, _ -> }
-                                            },
-                                            colors = ButtonDefaults.buttonColors(containerColor = SprucePrimary),
-                                            shape = RoundedCornerShape(12.dp),
-                                            modifier = Modifier.fillMaxWidth()
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                            verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Icon(imageVector = Icons.Default.Kitchen, contentDescription = null, modifier = Modifier.size(16.dp))
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            Text("Start Preparing in Kitchen", fontWeight = FontWeight.Bold)
+                                            OutlinedButton(
+                                                onClick = { orderToCancel = order },
+                                                colors = ButtonDefaults.outlinedButtonColors(contentColor = PolishRose),
+                                                shape = RoundedCornerShape(12.dp),
+                                                modifier = Modifier.weight(0.7f)
+                                            ) {
+                                                Text("Cancel")
+                                            }
+                                            Button(
+                                                onClick = {
+                                                    onUpdateOrderStatus(order.id, "preparing", "Food is being prepared in kitchen", null) { _, _ -> }
+                                                },
+                                                colors = ButtonDefaults.buttonColors(containerColor = SprucePrimary),
+                                                shape = RoundedCornerShape(12.dp),
+                                                modifier = Modifier.weight(1.3f)
+                                            ) {
+                                                Icon(imageVector = Icons.Default.Kitchen, contentDescription = null, modifier = Modifier.size(16.dp))
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Text("Start Preparing", fontWeight = FontWeight.Bold)
+                                            }
                                         }
                                     }
                                     "preparing" -> {
@@ -308,7 +437,7 @@ fun OrdersScreen(
                                         ) {
                                             Icon(imageVector = Icons.Default.DoneAll, contentDescription = null, modifier = Modifier.size(16.dp))
                                             Spacer(modifier = Modifier.width(6.dp))
-                                            Text("Mark Ready for Pickup", fontWeight = FontWeight.Bold)
+                                            Text("Mark Ready", fontWeight = FontWeight.Bold)
                                         }
                                     }
                                     "ready" -> {
@@ -359,6 +488,33 @@ fun OrdersScreen(
                     }
                 }
             }
+
+            // Pagination footer (Rule 1)
+            if (state.isLoadingMore) {
+                item {
+                    OrderCardSkeleton()
+                }
+            } else if (state.canLoadMore && filteredOrders.isNotEmpty()) {
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 12.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        OutlinedButton(
+                            onClick = onLoadMore,
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, SprucePrimary.copy(alpha = 0.5f)),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = SprucePrimary)
+                        ) {
+                            Icon(imageVector = Icons.Default.ExpandMore, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Load More Orders (20 more)", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -396,18 +552,23 @@ fun OrdersScreen(
                         ) {
                             Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Text("Customer Details", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Slate900)
-                                Text("Name: ${order.customerName ?: "Customer"}", color = Slate700)
-                                if (!order.customerPhone.isNullOrBlank()) {
+                                val detailCustName = order.customer?.fullName?.takeIf { it.isNotBlank() }
+                                    ?: order.customerName
+                                    ?: "Guest Customer"
+                                Text("Name: $detailCustName", color = Slate700)
+                                val detailCustPhone = order.customer?.phone?.takeIf { it.isNotBlank() }
+                                    ?: order.customerPhone
+                                if (!detailCustPhone.isNullOrBlank()) {
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.SpaceBetween,
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Text("Phone: ${order.customerPhone}", color = Slate700)
+                                        Text("Phone: $detailCustPhone", color = Slate700)
                                         Row {
                                             IconButton(
                                                 onClick = {
-                                                    val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:${order.customerPhone}"))
+                                                    val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$detailCustPhone"))
                                                     context.startActivity(intent)
                                                 },
                                                 modifier = Modifier.size(32.dp)
@@ -416,7 +577,7 @@ fun OrdersScreen(
                                             }
                                             IconButton(
                                                 onClick = {
-                                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://wa.me/${order.customerPhone?.replace("+", "")}"))
+                                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://wa.me/${detailCustPhone.replace("+", "")}"))
                                                     context.startActivity(intent)
                                                 },
                                                 modifier = Modifier.size(32.dp)

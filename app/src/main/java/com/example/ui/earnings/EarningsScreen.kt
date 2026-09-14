@@ -17,15 +17,18 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.widget.Toast
 import com.example.data.model.Payout
 import com.example.data.model.WalletTransaction
 import com.example.data.model.Withdrawal
 import com.example.ui.components.ConfirmationDialog
 import com.example.ui.components.StatusBadge
+import com.example.ui.components.TransactionCardSkeleton
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.EarningsUiState
 
@@ -41,6 +44,7 @@ fun EarningsScreen(
     state: EarningsUiState,
     onRequestWithdrawal: (amount: Double, note: String?, onComplete: (Boolean, String?) -> Unit) -> Unit,
     onRefresh: () -> Unit,
+    onLoadMoreTransactions: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var activeSubTab by remember { mutableStateOf(EarningsSubTab.TRANSACTIONS) }
@@ -51,6 +55,74 @@ fun EarningsScreen(
             .fillMaxSize()
             .background(PolishBackgroundLight)
     ) {
+        // Global Error / Info Banner if present
+        if (!state.errorMessage.isNullOrBlank()) {
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = PolishRoseLight,
+                border = BorderStroke(1.dp, PolishRose.copy(alpha = 0.35f)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 16.dp, end = 16.dp, top = 12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ErrorOutline,
+                        contentDescription = null,
+                        tint = PolishRose,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Text(
+                        text = state.errorMessage ?: "",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = PolishRoseDark,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.weight(1f)
+                    )
+                    OutlinedButton(
+                        onClick = onRefresh,
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text("Retry", fontSize = 12.sp)
+                    }
+                }
+            }
+        } else if (!state.successMessage.isNullOrBlank()) {
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = PolishEmeraldLight,
+                border = BorderStroke(1.dp, PolishEmeraldDark.copy(alpha = 0.3f)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 16.dp, end = 16.dp, top = 12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.CheckCircle,
+                        contentDescription = null,
+                        tint = PolishEmeraldDark,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Text(
+                        text = state.successMessage ?: "",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = PolishEmeraldDark,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+        }
+
         // Balance Header Card (Deep Spruce Polish)
         Surface(
             modifier = Modifier
@@ -159,7 +231,11 @@ fun EarningsScreen(
                     contentPadding = PaddingValues(vertical = 14.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    if (state.walletTransactions.isEmpty()) {
+                    if (state.isLoading && state.walletTransactions.isEmpty()) {
+                        items(4) {
+                            TransactionCardSkeleton()
+                        }
+                    } else if (state.walletTransactions.isEmpty()) {
                         item {
                             EmptyStateCard(
                                 icon = Icons.Outlined.Receipt,
@@ -223,6 +299,33 @@ fun EarningsScreen(
                                         fontSize = 15.sp,
                                         color = if (isDebit) PolishRose else PolishEmeraldDark
                                     )
+                                }
+                            }
+                        }
+
+                        // Rule 1: Pagination footer (20 transactions at a time)
+                        if (state.isLoadingMoreTransactions) {
+                            item {
+                                TransactionCardSkeleton()
+                            }
+                        } else if (state.canLoadMoreTransactions) {
+                            item {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 8.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    OutlinedButton(
+                                        onClick = onLoadMoreTransactions,
+                                        shape = RoundedCornerShape(12.dp),
+                                        border = BorderStroke(1.dp, SprucePrimary.copy(alpha = 0.5f)),
+                                        colors = ButtonDefaults.outlinedButtonColors(contentColor = SprucePrimary)
+                                    ) {
+                                        Icon(imageVector = Icons.Default.ExpandMore, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("Load More Transactions (20 more)", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                                    }
                                 }
                             }
                         }
@@ -372,62 +475,229 @@ fun EarningsScreen(
 
     // --- Request Withdrawal Form Modal with Confirmation ---
     if (showWithdrawalDialog) {
+        val context = LocalContext.current
         var amountStr by remember { mutableStateOf("") }
         var note by remember { mutableStateOf("") }
         var errorMsg by remember { mutableStateOf<String?>(null) }
         var showConfirmSubmit by remember { mutableStateOf(false) }
 
+        val parsedAmount = amountStr.toDoubleOrNull()
+        val exceedsVisibleBalance = parsedAmount != null && parsedAmount > state.runningBalance
+        val isInvalidAmount = parsedAmount != null && parsedAmount <= 0.0
+
         if (showConfirmSubmit) {
-            val amount = amountStr.toDoubleOrNull() ?: 0.0
+            val amount = parsedAmount ?: 0.0
             ConfirmationDialog(
                 title = "Confirm Withdrawal",
-                message = "Are you sure you want to request a payout of ₹${"%.2f".format(amount)} to your bank account?",
+                message = if (amount > state.runningBalance) {
+                    "Requested amount of ₹${"%.2f".format(amount)} exceeds your currently displayed balance (₹${"%.2f".format(state.runningBalance)}). Submit anyway to verify against live server balance?"
+                } else {
+                    "Are you sure you want to request a payout of ₹${"%.2f".format(amount)} to your bank account?"
+                },
                 confirmText = "Submit Request",
+                isLoading = state.isSubmittingWithdrawal,
                 onConfirm = {
                     onRequestWithdrawal(amount, note.ifBlank { null }) { success, err ->
                         if (success) {
                             showConfirmSubmit = false
                             showWithdrawalDialog = false
+                            Toast.makeText(context, "Withdrawal request submitted successfully", Toast.LENGTH_SHORT).show()
                         } else {
                             showConfirmSubmit = false
                             errorMsg = err
+                            Toast.makeText(context, err ?: "Withdrawal request failed", Toast.LENGTH_LONG).show()
                         }
                     }
                 },
-                onDismiss = { showConfirmSubmit = false }
+                onDismiss = {
+                    if (!state.isSubmittingWithdrawal) showConfirmSubmit = false
+                }
             )
         } else {
             AlertDialog(
-                onDismissRequest = { showWithdrawalDialog = false },
+                onDismissRequest = {
+                    if (!state.isSubmittingWithdrawal) showWithdrawalDialog = false
+                },
                 title = {
-                    Text("Request Withdrawal", fontWeight = FontWeight.Bold, color = Slate900)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Payments,
+                            contentDescription = null,
+                            tint = SprucePrimary,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Text("Request Withdrawal", fontWeight = FontWeight.Bold, color = Slate900)
+                    }
                 },
                 text = {
                     Column(
                         modifier = Modifier.fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                        verticalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
-                        Text(
-                            text = "Available Balance: ₹${"%.2f".format(state.runningBalance)}",
-                            fontWeight = FontWeight.SemiBold,
-                            color = PolishEmeraldDark
-                        )
+                        // 1. Available Wallet Balance Card (Clearly shown above amount input)
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = PolishEmeraldLight.copy(alpha = 0.45f),
+                            border = BorderStroke(1.dp, PolishEmeraldDark.copy(alpha = 0.25f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(34.dp)
+                                            .clip(CircleShape)
+                                            .background(PolishEmeraldDark.copy(alpha = 0.12f)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.AccountBalanceWallet,
+                                            contentDescription = null,
+                                            tint = PolishEmeraldDark,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                    Column {
+                                        Text(
+                                            text = "Available Balance",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = Slate600
+                                        )
+                                        Text(
+                                            text = "₹${"%.2f".format(state.runningBalance)}",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = PolishEmeraldDark
+                                        )
+                                    }
+                                }
 
-                        if (errorMsg != null) {
-                            Text(text = errorMsg ?: "", color = PolishRose, fontSize = 12.sp)
+                                if (state.runningBalance > 0) {
+                                    FilledTonalButton(
+                                        onClick = {
+                                            amountStr = if (state.runningBalance % 1.0 == 0.0) {
+                                                state.runningBalance.toLong().toString()
+                                            } else {
+                                                "%.2f".format(state.runningBalance)
+                                            }
+                                            errorMsg = null
+                                        },
+                                        shape = RoundedCornerShape(8.dp),
+                                        colors = ButtonDefaults.filledTonalButtonColors(
+                                            containerColor = PolishEmeraldDark.copy(alpha = 0.15f),
+                                            contentColor = PolishEmeraldDark
+                                        ),
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                                        modifier = Modifier.height(28.dp)
+                                    ) {
+                                        Text("Use Max", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
                         }
 
-                        OutlinedTextField(
-                            value = amountStr,
-                            onValueChange = { amountStr = it; errorMsg = null },
-                            label = { Text("Amount (₹) *") },
-                            placeholder = { Text("e.g. 1000") },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(12.dp)
-                        )
+                        // 2. Server Error Message Banner (Shows exact Postgres error directly)
+                        if (!errorMsg.isNullOrBlank()) {
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = PolishRoseLight,
+                                border = BorderStroke(1.dp, PolishRose.copy(alpha = 0.4f)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.Top,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.ErrorOutline,
+                                        contentDescription = null,
+                                        tint = PolishRose,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "Withdrawal Failed",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = PolishRoseDark
+                                        )
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = errorMsg ?: "",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = PolishRoseDark,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
+                                }
+                            }
+                        }
 
+                        // 3. Amount Input
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            OutlinedTextField(
+                                value = amountStr,
+                                onValueChange = {
+                                    amountStr = it
+                                    errorMsg = null
+                                },
+                                label = { Text("Amount (₹) *") },
+                                placeholder = { Text("0.00") },
+                                leadingIcon = {
+                                    Text("₹", fontWeight = FontWeight.Bold, color = Slate600, fontSize = 16.sp)
+                                },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                singleLine = true,
+                                isError = exceedsVisibleBalance || isInvalidAmount,
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp)
+                            )
+
+                            // Client-side inline warning when entered amount exceeds visible balance
+                            if (exceedsVisibleBalance) {
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = PolishAmberLight,
+                                    border = BorderStroke(1.dp, PolishAmberDark.copy(alpha = 0.35f)),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.Top,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.WarningAmber,
+                                            contentDescription = null,
+                                            tint = PolishAmberDark,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Text(
+                                            text = "Amount exceeds visible balance (₹${"%.2f".format(state.runningBalance)}). The server will check live available funds upon submission.",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            fontSize = 11.5.sp,
+                                            color = PolishAmberDark,
+                                            lineHeight = 15.sp
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // 4. Note Input
                         OutlinedTextField(
                             value = note,
                             onValueChange = { note = it },
@@ -447,21 +717,29 @@ fun EarningsScreen(
                                 errorMsg = "Please enter a valid amount greater than 0"
                                 return@Button
                             }
-                            if (amount > state.runningBalance && state.runningBalance > 0) {
-                                errorMsg = "Amount exceeds your available balance (₹${"%.2f".format(state.runningBalance)})"
-                                return@Button
-                            }
                             showConfirmSubmit = true
                         },
+                        enabled = !state.isSubmittingWithdrawal,
                         shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = SprucePrimary)
                     ) {
-                        Text("Proceed", fontWeight = FontWeight.Bold)
+                        if (state.isSubmittingWithdrawal) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                color = Color.White,
+                                strokeWidth = 2.dp
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Submitting...")
+                        } else {
+                            Text("Proceed", fontWeight = FontWeight.Bold)
+                        }
                     }
                 },
                 dismissButton = {
                     OutlinedButton(
                         onClick = { showWithdrawalDialog = false },
+                        enabled = !state.isSubmittingWithdrawal,
                         shape = RoundedCornerShape(12.dp)
                     ) {
                         Text("Cancel")

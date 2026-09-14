@@ -22,7 +22,9 @@ import com.example.ui.auth.LoginScreen
 import com.example.ui.auth.PendingApprovalScreen
 import com.example.ui.auth.RegisterRestaurantScreen
 import com.example.ui.auth.RejectedScreen
+import com.example.ui.components.BlockingUpdateScreen
 import com.example.ui.components.InAppOrderAlertBanner
+import com.example.ui.components.MaintenanceBanner
 import com.example.ui.components.VendorBottomBar
 import com.example.ui.components.VendorNavTab
 import com.example.ui.components.VendorTopBar
@@ -38,12 +40,6 @@ import com.example.ui.viewmodel.VendorViewModel
 
 class MainActivity : ComponentActivity() {
     private val viewModel: VendorViewModel by viewModels()
-
-    private val requestPermissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { isGranted: Boolean ->
-        // Permission result handled
-    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -70,7 +66,11 @@ class MainActivity : ComponentActivity() {
     private fun checkNotificationPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-                requestPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                androidx.core.app.ActivityCompat.requestPermissions(
+                    this,
+                    arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                    1001
+                )
             }
         }
     }
@@ -78,11 +78,13 @@ class MainActivity : ComponentActivity() {
     private fun handleIntent(intent: Intent?) {
         val selectedOrderId = intent?.getStringExtra("SELECTED_ORDER_ID")
         if (!selectedOrderId.isNullOrBlank()) {
-            val order = viewModel.ordersState.value.orders.firstOrNull { it.id == selectedOrderId }
-            if (order != null) {
-                viewModel.selectOrder(order)
-            }
+            viewModel.navigateToOrders(selectedOrderId)
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        viewModel.onAppForegrounded()
     }
 }
 
@@ -100,11 +102,35 @@ fun MainVendorApp(
     val reviewsState by viewModel.reviewsState.collectAsStateWithLifecycle()
     val profileState by viewModel.profileState.collectAsStateWithLifecycle()
     val orderAlertNotification by viewModel.orderAlertNotification.collectAsStateWithLifecycle()
+    val sessionNotice by viewModel.sessionExpiredNotice.collectAsStateWithLifecycle()
+    val targetNav by viewModel.targetNavigation.collectAsStateWithLifecycle()
+    val blockingUpdate by viewModel.blockingUpdateState.collectAsStateWithLifecycle()
+    val maintenanceBanner by viewModel.maintenanceBannerState.collectAsStateWithLifecycle()
+
+    // 1. Blocking Screen when App Version is below minimum supported version or force update is active
+    if (blockingUpdate.isBlocked) {
+        BlockingUpdateScreen(
+            updateMessage = blockingUpdate.updateMessage,
+            currentVersion = blockingUpdate.currentAppVersion,
+            minimumVersion = blockingUpdate.minimumSupportedVersion,
+            updateUrl = blockingUpdate.updateUrl,
+            onCheckAgain = { viewModel.runStartupChecks() },
+            modifier = modifier
+        )
+        return
+    }
 
     var currentTab by remember {
         mutableStateOf(
             if (initialTargetTab.equals("orders", ignoreCase = true)) VendorNavTab.ORDERS else VendorNavTab.HOME
         )
+    }
+
+    LaunchedEffect(targetNav) {
+        if (targetNav != null) {
+            currentTab = VendorNavTab.ORDERS
+            viewModel.clearTargetNavigation()
+        }
     }
     var showingProfileScreen by remember { mutableStateOf(false) }
     var showingRegisterScreen by remember { mutableStateOf(false) }
@@ -120,20 +146,38 @@ fun MainVendorApp(
         }
 
         is AuthUiState.Unauthenticated -> {
-            if (showingRegisterScreen) {
-                RegisterRestaurantScreen(
-                    viewModel = viewModel,
-                    onNavigateBackToLogin = { showingRegisterScreen = false },
-                    modifier = modifier
-                )
-            } else {
-                LoginScreen(
-                    onLogin = { email, password, onComplete ->
-                        viewModel.login(email, password, onComplete)
-                    },
-                    onNavigateToRegister = { showingRegisterScreen = true },
-                    modifier = modifier
-                )
+            Column(modifier = modifier.fillMaxSize()) {
+                AnimatedVisibility(
+                    visible = maintenanceBanner.isEnabled && !maintenanceBanner.isDismissedForSession,
+                    enter = slideInVertically() + fadeIn(),
+                    exit = slideOutVertically() + fadeOut()
+                ) {
+                    MaintenanceBanner(
+                        message = maintenanceBanner.message,
+                        onDismiss = { viewModel.dismissMaintenanceBanner() },
+                        modifier = Modifier.statusBarsPadding()
+                    )
+                }
+
+                Box(modifier = Modifier.weight(1f)) {
+                    if (showingRegisterScreen) {
+                        RegisterRestaurantScreen(
+                            viewModel = viewModel,
+                            onNavigateBackToLogin = { showingRegisterScreen = false },
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else {
+                        LoginScreen(
+                            onLogin = { email, password, onComplete ->
+                                viewModel.login(email, password, onComplete)
+                            },
+                            onNavigateToRegister = { showingRegisterScreen = true },
+                            sessionNotice = sessionNotice,
+                            onClearSessionNotice = { viewModel.clearSessionExpiredNotice() },
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                }
             }
         }
 
@@ -171,8 +215,14 @@ fun MainVendorApp(
             if (showingProfileScreen) {
                 StoreProfileScreen(
                     state = profileState,
-                    onSaveProfile = { name, ownerName, phone, address, lat, lng, openTime, closeTime, bannerUrl, onComplete ->
-                        viewModel.updateVendorProfile(name, ownerName, phone, address, lat, lng, openTime, closeTime, bannerUrl, onComplete)
+                    onSaveProfile = { name, ownerName, phone, address, lat, lng, openTime, closeTime, bannerUrl, cityId, onComplete ->
+                        viewModel.updateVendorProfile(name, ownerName, phone, address, lat, lng, openTime, closeTime, bannerUrl, cityId, onComplete)
+                    },
+                    onRefreshProfile = {
+                        viewModel.loadProfile()
+                    },
+                    onUploadBanner = { fileName, fileBytes, mimeType, onComplete ->
+                        viewModel.uploadStoreBanner(fileName, fileBytes, mimeType, onComplete)
                     },
                     onAddOperatingHour = { start, end, active, closed, day, onComplete ->
                         viewModel.addOperatingHour(start, end, active, closed, day, onComplete)
@@ -218,7 +268,7 @@ fun MainVendorApp(
                         VendorBottomBar(
                             currentTab = currentTab,
                             onTabSelected = { currentTab = it },
-                            pendingOrdersCount = dashboardState.pendingOrdersCount
+                            confirmedOrdersCount = dashboardState.confirmedOrdersCount
                         )
                     },
                     modifier = modifier.fillMaxSize()
@@ -228,6 +278,18 @@ fun MainVendorApp(
                             .fillMaxSize()
                             .padding(innerPadding)
                     ) {
+                        // Platform Maintenance Mode Top Banner (dismissible for this session, reappears on next launch)
+                        AnimatedVisibility(
+                            visible = maintenanceBanner.isEnabled && !maintenanceBanner.isDismissedForSession,
+                            enter = slideInVertically() + fadeIn(),
+                            exit = slideOutVertically() + fadeOut()
+                        ) {
+                            MaintenanceBanner(
+                                message = maintenanceBanner.message,
+                                onDismiss = { viewModel.dismissMaintenanceBanner() }
+                            )
+                        }
+
                         // In-App Notification Alert Banner for New Orders
                         AnimatedVisibility(
                             visible = orderAlertNotification != null,
@@ -241,7 +303,7 @@ fun MainVendorApp(
                                     onViewOrders = {
                                         viewModel.clearOrderAlert()
                                         currentTab = VendorNavTab.ORDERS
-                                        viewModel.setOrdersFilter("PENDING")
+                                        viewModel.setOrdersFilter("CONFIRMED")
                                     }
                                 )
                             }
@@ -282,11 +344,17 @@ fun MainVendorApp(
                                         onDeleteCategory = { id, onComplete ->
                                             viewModel.deleteCategory(id, onComplete)
                                         },
-                                        onAddProduct = { catId, name, desc, price, img, active, from, until, onComplete ->
-                                            viewModel.addProduct(catId, name, desc, price, img, active, from, until, onComplete)
+                                        onAddProduct = { catId, name, desc, price, img, active, from, until, stock, isAvail, onComplete ->
+                                            viewModel.addProduct(catId, name, desc, price, img, active, from, until, stock, isAvail, onComplete)
                                         },
                                         onUpdateProduct = { prodId, updates, onComplete ->
                                             viewModel.updateProduct(prodId, updates, onComplete)
+                                        },
+                                        onQuickRestockItem = { prodId, stock ->
+                                            viewModel.quickRestockProduct(prodId, stock)
+                                        },
+                                        onRestockAllZeroStock = { targetStock ->
+                                            viewModel.restockZeroStockProducts(targetStock)
                                         },
                                         onToggleProductActive = { product ->
                                             viewModel.toggleProductActive(product)
@@ -300,7 +368,9 @@ fun MainVendorApp(
                                         onUploadProductImage = { fileName, fileBytes, mimeType, onComplete ->
                                             viewModel.uploadProductImage(fileName, fileBytes, mimeType, onComplete)
                                         },
-                                        onRefresh = { viewModel.refreshAll() }
+                                        onRefresh = { viewModel.refreshAll() },
+                                        onLoadMore = { viewModel.loadMoreProducts() },
+                                        onSearchQueryChange = { viewModel.setMenuSearchQuery(it) }
                                     )
                                 }
 
@@ -316,7 +386,9 @@ fun MainVendorApp(
                                         onUpdateOrderStatus = { orderId, newStatus, notes, cancellationReason, onComplete ->
                                             viewModel.updateOrderStatus(orderId, newStatus, notes, cancellationReason, onComplete)
                                         },
-                                        onRefresh = { viewModel.refreshAll() }
+                                        onRefresh = { viewModel.refreshAll() },
+                                        onLoadMore = { viewModel.loadMoreOrders() },
+                                        onSearchQueryChange = { viewModel.setOrdersSearchQuery(it) }
                                     )
                                 }
 
@@ -326,14 +398,16 @@ fun MainVendorApp(
                                         onRequestWithdrawal = { amount, note, onComplete ->
                                             viewModel.requestWithdrawal(amount, note, onComplete)
                                         },
-                                        onRefresh = { viewModel.refreshAll() }
+                                        onRefresh = { viewModel.refreshAll() },
+                                        onLoadMoreTransactions = { viewModel.loadMoreTransactions() }
                                     )
                                 }
 
                                 VendorNavTab.REVIEWS -> {
                                     ReviewsScreen(
                                         state = reviewsState,
-                                        onRefresh = { viewModel.refreshAll() }
+                                        onRefresh = { viewModel.refreshAll() },
+                                        onLoadMore = { viewModel.loadMoreReviews() }
                                     )
                                 }
                             }

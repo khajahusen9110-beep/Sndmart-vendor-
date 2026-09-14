@@ -27,7 +27,7 @@ enum class VendorNavTab(
 fun VendorBottomBar(
     currentTab: VendorNavTab,
     onTabSelected: (VendorNavTab) -> Unit,
-    pendingOrdersCount: Int = 0,
+    confirmedOrdersCount: Int = 0,
     modifier: Modifier = Modifier
 ) {
     NavigationBar(
@@ -42,14 +42,14 @@ fun VendorBottomBar(
                 selected = selected,
                 onClick = { onTabSelected(tab) },
                 icon = {
-                    if (tab == VendorNavTab.ORDERS && pendingOrdersCount > 0) {
+                    if (tab == VendorNavTab.ORDERS && confirmedOrdersCount > 0) {
                         BadgedBox(
                             badge = {
                                 Badge(
-                                    containerColor = PolishRose,
+                                    containerColor = SprucePrimary,
                                     contentColor = Color.White
                                 ) {
-                                    Text(text = pendingOrdersCount.toString(), fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                                    Text(text = confirmedOrdersCount.toString(), fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
                                 }
                             }
                         ) {

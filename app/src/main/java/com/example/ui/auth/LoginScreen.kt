@@ -32,15 +32,17 @@ import com.example.ui.theme.*
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LoginScreen(
-    onLogin: (email: String, password: String, onComplete: (Boolean, String?) -> Unit) -> Unit,
+    onLogin: (identifier: String, password: String, onComplete: (Boolean, String?) -> Unit) -> Unit,
     onNavigateToRegister: () -> Unit = {},
+    sessionNotice: String? = null,
+    onClearSessionNotice: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    var email by remember { mutableStateOf("") }
+    var mobileNumber by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
     var isLoading by remember { mutableStateOf(false) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
+    var errorMessage by remember(sessionNotice) { mutableStateOf(sessionNotice) }
     val focusManager = LocalFocusManager.current
 
     Box(
@@ -111,37 +113,58 @@ fun LoginScreen(
                     )
 
                     if (errorMessage != null) {
+                        val isSessionNotice = errorMessage?.contains("session", ignoreCase = true) == true
                         Surface(
                             shape = RoundedCornerShape(12.dp),
-                            color = PolishRoseLight,
-                            border = BorderStroke(1.dp, Color(0xFFFFD5D5)),
+                            color = if (isSessionNotice) Color(0xFFFFF3E0) else PolishRoseLight,
+                            border = BorderStroke(1.dp, if (isSessionNotice) Color(0xFFFFB74D) else Color(0xFFFFD5D5)),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text(
-                                text = errorMessage ?: "",
-                                color = PolishRose,
-                                style = MaterialTheme.typography.bodySmall,
-                                fontWeight = FontWeight.Medium,
-                                modifier = Modifier.padding(12.dp)
-                            )
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (isSessionNotice) Icons.Default.LockClock else Icons.Default.ErrorOutline,
+                                    contentDescription = null,
+                                    tint = if (isSessionNotice) Color(0xFFE65100) else PolishRose,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Text(
+                                    text = errorMessage ?: "",
+                                    color = if (isSessionNotice) Color(0xFFE65100) else PolishRose,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Medium,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
                         }
                     }
 
                     OutlinedTextField(
-                        value = email,
+                        value = mobileNumber,
                         onValueChange = {
-                            email = it
+                            mobileNumber = it
                             errorMessage = null
+                            onClearSessionNotice()
                         },
-                        label = { Text("Vendor Email") },
-                        placeholder = { Text("hotel@example.com", color = Slate400) },
+                        label = { Text("Vendor Mobile Number") },
+                        placeholder = { Text("9876543210", color = Slate400) },
                         leadingIcon = {
-                            Icon(imageVector = Icons.Default.Email, contentDescription = null, tint = Slate400)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(start = 12.dp, end = 6.dp)
+                            ) {
+                                Icon(imageVector = Icons.Default.Phone, contentDescription = null, tint = Slate400)
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("+91", fontWeight = FontWeight.SemiBold, color = Slate700, fontSize = 14.sp)
+                            }
                         },
                         colors = polishTextFieldColors(),
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(
-                            keyboardType = KeyboardType.Email,
+                            keyboardType = KeyboardType.Phone,
                             imeAction = ImeAction.Next
                         ),
                         keyboardActions = KeyboardActions(
@@ -180,9 +203,9 @@ fun LoginScreen(
                         keyboardActions = KeyboardActions(
                             onDone = {
                                 focusManager.clearFocus()
-                                if (email.isNotBlank() && password.isNotBlank()) {
+                                if (mobileNumber.isNotBlank() && password.isNotBlank()) {
                                     isLoading = true
-                                    onLogin(email, password) { success, err ->
+                                    onLogin(mobileNumber, password) { success, err ->
                                         isLoading = false
                                         if (!success) errorMessage = err ?: "Login failed"
                                     }
@@ -197,21 +220,26 @@ fun LoginScreen(
 
                     Button(
                         onClick = {
-                            if (email.isBlank() || password.isBlank()) {
-                                errorMessage = "Please enter both email and password."
+                            if (mobileNumber.isBlank() || password.isBlank()) {
+                                errorMessage = "Please enter both mobile number and password."
+                                return@Button
+                            }
+                            val digitsOnly = mobileNumber.trim().filter { it.isDigit() }
+                            if (digitsOnly.length < 10) {
+                                errorMessage = "Please enter a valid 10-digit mobile number."
                                 return@Button
                             }
                             focusManager.clearFocus()
                             isLoading = true
                             errorMessage = null
-                            onLogin(email, password) { success, err ->
+                            onLogin(mobileNumber, password) { success, err ->
                                 isLoading = false
                                 if (!success) {
                                     errorMessage = err ?: "Authentication failed. Check your credentials."
                                 }
                             }
                         },
-                        enabled = !isLoading && email.isNotBlank() && password.isNotBlank(),
+                        enabled = !isLoading && mobileNumber.isNotBlank() && password.isNotBlank(),
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(52.dp),

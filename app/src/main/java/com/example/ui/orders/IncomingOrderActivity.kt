@@ -111,8 +111,8 @@ class IncomingOrderActivity : ComponentActivity() {
                             startVibrationAlert()
                         }
                     },
-                    onAccept = { targetOrderId ->
-                        handleAcceptOrder(targetOrderId)
+                    onStartPreparing = { targetOrderId ->
+                        handleStartPreparingOrder(targetOrderId)
                     },
                     onReject = { targetOrderId, reason ->
                         handleRejectOrder(targetOrderId, reason)
@@ -224,7 +224,7 @@ class IncomingOrderActivity : ComponentActivity() {
         stopVibrationAlert()
     }
 
-    private fun handleAcceptOrder(orderId: String) {
+    private fun handleStartPreparingOrder(orderId: String) {
         stopAlerts()
         NotificationHelper.dismissIncomingOrderAlert(applicationContext)
 
@@ -232,10 +232,10 @@ class IncomingOrderActivity : ComponentActivity() {
             try {
                 val supabaseClient = SupabaseClient(sessionManager)
                 val repository = VendorRepository(supabaseClient, sessionManager)
-                val res = repository.updateOrderStatus(orderId, "confirmed", notes = "Accepted via Full-Screen Alert")
+                val res = repository.updateOrderStatus(orderId, "preparing", notes = "Preparation started via Full-Screen Alert")
                 withContext(Dispatchers.Main) {
                     if (res is Resource.Success) {
-                        Toast.makeText(applicationContext, "Order #$orderId accepted! Moving to kitchen.", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(applicationContext, "Order #$orderId moved to kitchen preparation!", Toast.LENGTH_SHORT).show()
                     }
                     val mainIntent = Intent(applicationContext, MainActivity::class.java).apply {
                         flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -299,13 +299,13 @@ fun IncomingOrderScreen(
     initialItemsSummary: String?,
     isMuted: Boolean,
     onToggleMute: (Boolean) -> Unit,
-    onAccept: (orderId: String) -> Unit,
+    onStartPreparing: (orderId: String) -> Unit,
     onReject: (orderId: String, reason: String) -> Unit,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
     var isMutedState by remember { mutableStateOf(isMuted) }
-    var isAccepting by remember { mutableStateOf(false) }
+    var isPreparing by remember { mutableStateOf(false) }
     var isRejecting by remember { mutableStateOf(false) }
     var showRejectDialog by remember { mutableStateOf(false) }
     var rejectionReason by remember { mutableStateOf("Kitchen too busy") }
@@ -482,14 +482,14 @@ fun IncomingOrderScreen(
                 Spacer(modifier = Modifier.height(16.dp))
 
                 Text(
-                    text = "New Order #$orderNumber",
+                    text = "New Order - Please Prepare",
                     style = MaterialTheme.typography.headlineMedium,
                     fontWeight = FontWeight.ExtraBold,
                     color = Color.White
                 )
 
                 Text(
-                    text = "Auto-dismisses in ${timeLeft}s if not accepted",
+                    text = "Order #$orderNumber • Confirmed by City Admin • Auto-dismisses in ${timeLeft}s",
                     style = MaterialTheme.typography.bodySmall,
                     color = Slate400
                 )
@@ -636,18 +636,18 @@ fun IncomingOrderScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // --- BOTTOM ACTIONS: Accept & Reject Buttons ---
+            // --- BOTTOM ACTIONS: Start Preparing & Options ---
             Column(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // Big Glowing Accept Button
+                // Big Glowing Start Preparing Button
                 Button(
                     onClick = {
-                        isAccepting = true
-                        onAccept(orderId)
+                        isPreparing = true
+                        onStartPreparing(orderId)
                     },
-                    enabled = !isAccepting && !isRejecting,
+                    enabled = !isPreparing && !isRejecting,
                     shape = RoundedCornerShape(20.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = SprucePrimary,
@@ -657,15 +657,15 @@ fun IncomingOrderScreen(
                         .fillMaxWidth()
                         .height(64.dp)
                 ) {
-                    if (isAccepting) {
+                    if (isPreparing) {
                         CircularProgressIndicator(color = Color.White, modifier = Modifier.size(24.dp), strokeWidth = 3.dp)
                         Spacer(modifier = Modifier.width(12.dp))
-                        Text("ACCEPTING ORDER...", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        Text("STARTING PREPARATION...", fontSize = 16.sp, fontWeight = FontWeight.Bold)
                     } else {
-                        Icon(imageVector = Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(26.dp))
+                        Icon(imageVector = Icons.Default.Kitchen, contentDescription = null, modifier = Modifier.size(26.dp))
                         Spacer(modifier = Modifier.width(10.dp))
                         Text(
-                            text = "ACCEPT ORDER",
+                            text = "START PREPARING",
                             fontSize = 18.sp,
                             fontWeight = FontWeight.ExtraBold,
                             letterSpacing = 1.sp
@@ -673,14 +673,14 @@ fun IncomingOrderScreen(
                     }
                 }
 
-                // Reject Button
+                // Secondary Options
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     OutlinedButton(
                         onClick = { showRejectDialog = true },
-                        enabled = !isAccepting && !isRejecting,
+                        enabled = !isPreparing && !isRejecting,
                         shape = RoundedCornerShape(16.dp),
                         colors = ButtonDefaults.outlinedButtonColors(
                             contentColor = PolishRose
@@ -692,7 +692,7 @@ fun IncomingOrderScreen(
                     ) {
                         Icon(imageVector = Icons.Default.Cancel, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Decline Order", fontWeight = FontWeight.Bold)
+                        Text("Cancel Order", fontWeight = FontWeight.Bold)
                     }
 
                     OutlinedButton(

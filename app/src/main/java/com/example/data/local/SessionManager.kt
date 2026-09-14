@@ -20,6 +20,53 @@ class SessionManager(context: Context) {
         private const val KEY_CUSTOM_ANON_KEY = "custom_anon_key"
         private const val KEY_FCM_TOKEN = "fcm_token"
         private const val KEY_SOUND_ALERT_ENABLED = "sound_alert_enabled"
+        private const val KEY_SESSION_EXPIRED_MESSAGE = "session_expired_message"
+        private const val KEY_TOKEN_EXPIRES_AT = "token_expires_at"
+    }
+
+    val sessionExpiredFlow = kotlinx.coroutines.flow.MutableSharedFlow<String>(extraBufferCapacity = 1)
+
+    var sessionExpiredMessage: String?
+        get() = prefs.getString(KEY_SESSION_EXPIRED_MESSAGE, null)
+        set(value) {
+            if (value != null) prefs.edit().putString(KEY_SESSION_EXPIRED_MESSAGE, value).apply()
+            else prefs.edit().remove(KEY_SESSION_EXPIRED_MESSAGE).apply()
+        }
+
+    var tokenExpiresAt: Long
+        get() = prefs.getLong(KEY_TOKEN_EXPIRES_AT, 0L)
+        set(value) = prefs.edit().putLong(KEY_TOKEN_EXPIRES_AT, value).apply()
+
+    val hasValidRefreshToken: Boolean
+        get() = !refreshToken.isNullOrBlank()
+
+    fun isTokenExpiredOrExpiringSoon(thresholdSeconds: Long = 180): Boolean {
+        if (accessToken.isNullOrBlank()) return true
+        val expiry = tokenExpiresAt
+        if (expiry <= 0L) {
+            // Expiration timestamp not recorded — if we have a refresh token, proactively refresh
+            return hasValidRefreshToken
+        }
+        val nowSeconds = System.currentTimeMillis() / 1000
+        return nowSeconds >= (expiry - thresholdSeconds)
+    }
+
+    fun updateTokens(newAccessToken: String, newRefreshToken: String? = null, expiresInSeconds: Long? = null) {
+        accessToken = newAccessToken
+        if (!newRefreshToken.isNullOrBlank()) {
+            refreshToken = newRefreshToken
+        }
+        if (expiresInSeconds != null && expiresInSeconds > 0) {
+            tokenExpiresAt = (System.currentTimeMillis() / 1000) + expiresInSeconds
+        } else {
+            // Default Supabase token expiry is 1 hour (3600 seconds)
+            tokenExpiresAt = (System.currentTimeMillis() / 1000) + 3600
+        }
+    }
+
+    fun notifySessionExpired(message: String = "Your session expired, please log in again") {
+        sessionExpiredMessage = message
+        sessionExpiredFlow.tryEmit(message)
     }
 
     var isSoundAlertEnabled: Boolean
@@ -78,6 +125,7 @@ class SessionManager(context: Context) {
             .remove(KEY_USER_ID)
             .remove(KEY_USER_EMAIL)
             .remove(KEY_VENDOR_DATA)
+            .remove(KEY_TOKEN_EXPIRES_AT)
             .apply()
     }
 }
