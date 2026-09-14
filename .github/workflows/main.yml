@@ -22,10 +22,6 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
 
-      # Gradlew execution permission
-      - name: Grant Execute Permission to Gradlew
-        run: chmod +x gradlew
-
       # Firebase config restore
       - name: Restore google-services.json
         run: |
@@ -69,7 +65,7 @@ jobs:
           GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
           VITE_GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
         run: |
-          ./gradlew assembleRelease \
+          gradle assembleRelease \
             --no-daemon \
             -x test \
             -Pandroid.injected.signing.store.file=$(pwd)/app/release.keystore \
@@ -87,7 +83,7 @@ jobs:
           GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
           VITE_GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
         run: |
-          ./gradlew bundleRelease \
+          gradle bundleRelease \
             --no-daemon \
             -x test \
             -Pandroid.injected.signing.store.file=$(pwd)/app/release.keystore \
