@@ -126,7 +126,7 @@ interface SupabaseApi {
     suspend fun getOrders(
         @Query("vendor_id") vendorIdFilter: String,
         @Query("status") statusFilter: String = "in.(confirmed,preparing,ready,out_for_delivery,delivered,cancelled,rejected)",
-        @Query("select") select: String = "id,order_number,status,subtotal,discount_amount,delivery_fee,handling_fee,total_amount,commission_amount,vendor_amount,notes,payment_status,payment_method,delivery_address,created_at,order_items(id,product_name,quantity,unit_price,total_price),customer:profiles!orders_customer_id_fkey(full_name,phone)",
+        @Query("select") select: String = "id,order_number,status,subtotal,discount_amount,delivery_fee,handling_fee,total_amount,commission_amount,vendor_amount,notes,payment_status,payment_method,delivery_address,created_at,order_items(id,product_name,quantity,unit_price,total_price),customer:profiles!orders_customer_id_profiles_fkey(full_name,phone)",
         @Query("order") order: String = "created_at.desc",
         @Query("limit") limit: Int? = 20,
         @Query("offset") offset: Int? = 0
@@ -135,7 +135,7 @@ interface SupabaseApi {
     @GET("rest/v1/orders")
     suspend fun getOrderById(
         @Query("id") idFilter: String,
-        @Query("select") select: String = "*,order_items(*),customer:profiles!orders_customer_id_fkey(full_name,phone)"
+        @Query("select") select: String = "*,order_items(*),customer:profiles!orders_customer_id_profiles_fkey(full_name,phone)"
     ): Response<List<Order>>
 
     @PATCH("rest/v1/orders")
