@@ -22,43 +22,42 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
 
+      # Gradlew execution permission
+      - name: Grant Execute Permission to Gradlew
+        run: chmod +x gradlew
+
+      # Firebase config restore
       - name: Restore google-services.json
         run: |
           echo '${{ secrets.GOOGLE_SERVICES_JSON }}' > app/google-services.json
 
-      # Vite .env aur Android properties dono jagah Supabase keys write karna
-      - name: Inject Supabase Environment Variables
+      # Fixed Keystore decode (Har build me same key)
+      - name: Decode Keystore
         run: |
-          # 1. Root .env file (Vite ke liye)
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > app/release.keystore
+
+      # Environment variables & properties injection
+      - name: Inject Environment Variables
+        run: |
           cat << 'EOF' > .env
           VITE_SUPABASE_URL=${{ secrets.SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY }}
           SUPABASE_URL=${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY }}
+          VITE_GOOGLE_MAPS_API_KEY=${{ secrets.GOOGLE_MAPS_API_KEY }}
+          GOOGLE_MAPS_API_KEY=${{ secrets.GOOGLE_MAPS_API_KEY }}
           EOF
 
-          # 2. Agar frontend kisi subfolder me ho to wahan bhi copy
           cp .env app/ || true
 
-          # 3. Android Gradle properties
           echo "SUPABASE_URL=${{ secrets.SUPABASE_URL }}" >> local.properties
           echo "SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY }}" >> local.properties
+          echo "GOOGLE_MAPS_API_KEY=${{ secrets.GOOGLE_MAPS_API_KEY }}" >> local.properties
+          echo "MAPS_API_KEY=${{ secrets.GOOGLE_MAPS_API_KEY }}" >> local.properties
+
           echo "supabaseUrl=${{ secrets.SUPABASE_URL }}" >> gradle.properties
           echo "supabaseKey=${{ secrets.SUPABASE_ANON_KEY }}" >> gradle.properties
-
-      # Production Keystore Generate karna
-      - name: Create Production Keystore
-        run: |
-          keytool -genkeypair -v \
-            -keystore release.keystore \
-            -alias releaseKey \
-            -keyalg RSA \
-            -keysize 2048 \
-            -validity 10000 \
-            -storepass MyStorePass123 \
-            -keypass MyStorePass123 \
-            -dname "CN=Sndmart, OU=Mobile, O=Sndmart, L=Sindhanur, S=Karnataka, C=IN"
-          cp release.keystore app/release.keystore
+          echo "googleMapsApiKey=${{ secrets.GOOGLE_MAPS_API_KEY }}" >> gradle.properties
 
       # Build APK
       - name: Build APK
@@ -67,16 +66,16 @@ jobs:
           VITE_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
+          VITE_GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
         run: |
-          gradle assembleRelease \
+          ./gradlew assembleRelease \
             --no-daemon \
-            -x lint \
-            -x lintVitalRelease \
             -x test \
-            -Pandroid.injected.signing.store.file=$(pwd)/release.keystore \
-            -Pandroid.injected.signing.store.password=MyStorePass123 \
-            -Pandroid.injected.signing.key.alias=releaseKey \
-            -Pandroid.injected.signing.key.password=MyStorePass123
+            -Pandroid.injected.signing.store.file=$(pwd)/app/release.keystore \
+            -Pandroid.injected.signing.store.password=${{ secrets.KEYSTORE_PASSWORD }} \
+            -Pandroid.injected.signing.key.alias=${{ secrets.KEY_ALIAS }} \
+            -Pandroid.injected.signing.key.password=${{ secrets.KEYSTORE_PASSWORD }}
 
       # Build App Bundle (AAB)
       - name: Build App Bundle (AAB)
@@ -85,17 +84,18 @@ jobs:
           VITE_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
+          VITE_GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
         run: |
-          gradle bundleRelease \
+          ./gradlew bundleRelease \
             --no-daemon \
-            -x lint \
-            -x lintVitalRelease \
             -x test \
-            -Pandroid.injected.signing.store.file=$(pwd)/release.keystore \
-            -Pandroid.injected.signing.store.password=MyStorePass123 \
-            -Pandroid.injected.signing.key.alias=releaseKey \
-            -Pandroid.injected.signing.key.password=MyStorePass123
+            -Pandroid.injected.signing.store.file=$(pwd)/app/release.keystore \
+            -Pandroid.injected.signing.store.password=${{ secrets.KEYSTORE_PASSWORD }} \
+            -Pandroid.injected.signing.key.alias=${{ secrets.KEY_ALIAS }} \
+            -Pandroid.injected.signing.key.password=${{ secrets.KEYSTORE_PASSWORD }}
 
+      # Artifacts Upload
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
@@ -107,10 +107,4 @@ jobs:
         with:
           name: app-release-aab
           path: app/build/outputs/bundle/release/*.aab
-
-      - name: Backup Keystore File
-        uses: actions/upload-artifact@v4
-        with:
-          name: production-keystore
-          path: release.keystore
           
