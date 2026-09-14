@@ -71,7 +71,6 @@ jobs:
           gradle assembleRelease \
             --no-daemon \
             -x lint \
-            -x lintVitalRelease \
             -x test \
             -Pandroid.injected.signing.store.file=$(pwd)/release.keystore \
             -Pandroid.injected.signing.store.password=MyStorePass123 \
@@ -89,7 +88,6 @@ jobs:
           gradle bundleRelease \
             --no-daemon \
             -x lint \
-            -x lintVitalRelease \
             -x test \
             -Pandroid.injected.signing.store.file=$(pwd)/release.keystore \
             -Pandroid.injected.signing.store.password=MyStorePass123 \
