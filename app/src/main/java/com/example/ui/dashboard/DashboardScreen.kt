@@ -370,7 +370,7 @@ fun DashboardScreen(
                             }
                             Column {
                                 Text(
-                                    text = order.customer?.fullName?.takeIf { it.isNotBlank() } ?: order.customerName ?: "Guest Customer",
+                                    text = order.customer?.full_name?.takeIf { it.isNotBlank() } ?: order.customer?.fullName?.takeIf { it.isNotBlank() } ?: order.customerName ?: "Guest Customer",
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 14.sp,
                                     color = Slate900
@@ -383,7 +383,7 @@ fun DashboardScreen(
                             }
                         }
 
-                        StatusBadge(status = order.status)
+                        StatusBadge(status = order.status ?: "pending")
                     }
                 }
             }

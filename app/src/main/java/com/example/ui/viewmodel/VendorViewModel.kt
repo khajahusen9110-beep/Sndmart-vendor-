@@ -87,6 +87,8 @@ data class OrdersUiState(
     val orders: List<Order> = emptyList(),
     val activeFilter: String = "ALL", // ALL, PENDING, CONFIRMED, PREPARING, READY, DELIVERED, CANCELLED
     val selectedOrder: Order? = null,
+    val selectedOrderHistory: List<OrderStatusHistory> = emptyList(),
+    val isLoadingHistory: Boolean = false,
     val searchQuery: String = "",
     val page: Int = 0,
     val canLoadMore: Boolean = true,
@@ -236,6 +238,15 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             sessionManager.sessionExpiredFlow.collect { reason ->
                 handleSessionExpired(reason)
+            }
+        }
+        viewModelScope.launch {
+            com.example.util.OrderEventBus.incomingOrderEvents.collect { _ ->
+                val vId = currentVendorId()
+                if (vId != null) {
+                    loadOrders(vId)
+                    loadDashboard(vId)
+                }
             }
         }
         runStartupChecks()
@@ -523,9 +534,9 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
                     val todayOrders = orders.filter { it.createdAt?.startsWith(todayStr) == true }
                     val ordersTodayCount = todayOrders.size
                     val earningsTodaySum = todayOrders
-                        .filter { it.status.lowercase() !in listOf("cancelled", "canceled") }
+                        .filter { it.status?.lowercase() !in listOf("cancelled", "canceled") }
                         .sumOf { it.totalAmount }
-                    val confirmedOrdersCount = orders.count { it.status.lowercase() == "confirmed" }
+                    val confirmedOrdersCount = orders.count { it.status?.lowercase() == "confirmed" }
 
                     _dashboardState.update {
                         it.copy(
@@ -944,14 +955,14 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
             _ordersState.update { it.copy(isLoading = true, errorMessage = null) }
             when (val res = repository.getOrders(vId, limit = 20, offset = 0)) {
                 is Resource.Success -> {
-                    val confirmedOrders = res.data.filter { it.status.lowercase() == "confirmed" }
+                    val confirmedOrders = res.data.filter { it.status?.lowercase() == "confirmed" }
                     val confirmedCount = confirmedOrders.size
                     if (confirmedCount > 0 && (confirmedCount > lastKnownConfirmedCount || lastKnownConfirmedCount == 0)) {
                         _inAppOrderAlert.value = "🛎️ New Order - Please Prepare!"
                         soundAlertManager.startRepeatingOrderAlert(
                             scope = viewModelScope,
                             isSoundEnabled = { sessionManager.isSoundAlertEnabled },
-                            hasPendingOrders = { _ordersState.value.orders.any { it.status.lowercase() == "confirmed" } }
+                            hasPendingOrders = { _ordersState.value.orders.any { it.status?.lowercase() == "confirmed" } }
                         )
                     } else if (confirmedCount == 0) {
                         soundAlertManager.stopRepeatingAlert()
@@ -1016,9 +1027,22 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun selectOrder(order: Order?) {
-        _ordersState.update { it.copy(selectedOrder = order) }
+        _ordersState.update { it.copy(selectedOrder = order, selectedOrderHistory = emptyList(), isLoadingHistory = order != null) }
         if (order?.status?.lowercase() in listOf("confirmed", "preparing")) {
             soundAlertManager.stopRepeatingAlert()
+        }
+        if (order != null) {
+            viewModelScope.launch {
+                when (val historyRes = repository.getOrderStatusHistory(order.id)) {
+                    is Resource.Success -> {
+                        _ordersState.update { it.copy(selectedOrderHistory = historyRes.data, isLoadingHistory = false) }
+                    }
+                    is Resource.Error -> {
+                        _ordersState.update { it.copy(isLoadingHistory = false) }
+                    }
+                    Resource.Loading -> {}
+                }
+            }
         }
     }
 
@@ -1041,7 +1065,7 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
                 is Resource.Success -> {
                     _ordersState.update {
                         val updatedList = it.orders.map { o ->
-                            if (o.id == orderId) o.copy(status = newStatus, cancellationReason = cancellationReason ?: o.cancellationReason)
+                            if (o.id == orderId) o.copy(status = newStatus, cancellation_reason = cancellationReason ?: o.cancellationReason)
                             else o
                         }
                         it.copy(
@@ -1053,6 +1077,14 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
                     }
                     val vId = currentVendorId()
                     if (vId != null) loadDashboard(vId)
+                    if (_ordersState.value.selectedOrder?.id == orderId) {
+                        viewModelScope.launch {
+                            val historyRes = repository.getOrderStatusHistory(orderId)
+                            if (historyRes is Resource.Success) {
+                                _ordersState.update { it.copy(selectedOrderHistory = historyRes.data) }
+                            }
+                        }
+                    }
                     onComplete(true, null)
                 }
                 is Resource.Error -> {

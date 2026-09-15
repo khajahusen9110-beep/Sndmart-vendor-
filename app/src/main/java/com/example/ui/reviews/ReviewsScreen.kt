@@ -263,7 +263,7 @@ fun ReviewsScreen(
                                 }
                                 Column {
                                     Text(
-                                        text = review.customerName?.ifBlank { "Customer" } ?: "Customer",
+                                        text = review.customer?.fullName?.takeIf { it.isNotBlank() } ?: review.customerName ?: "Customer",
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 14.sp,
                                         color = Slate900

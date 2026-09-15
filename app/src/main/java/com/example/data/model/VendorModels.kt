@@ -170,79 +170,114 @@ data class Product(
 }
 
 @JsonClass(generateAdapter = true)
-data class OrderCustomer(
-    @Json(name = "full_name") val fullName: String? = null,
+data class Customer(
+    val id: String? = null,
+    val full_name: String? = null,
     val phone: String? = null
-)
+) {
+    val fullName: String? get() = full_name
+}
+
+typealias OrderCustomer = Customer
 
 @JsonClass(generateAdapter = true)
-data class Order(
-    val id: String = "",
-    @Json(name = "order_number") val orderNumber: String? = null,
-    @Json(name = "customer_id") val customerId: String? = null,
-    @Json(name = "vendor_id") val vendorId: String = "",
-    @Json(name = "delivery_partner_id") val deliveryPartnerId: String? = null,
-    @Json(name = "address_id") val addressId: String? = null,
-    @Json(name = "slot_id") val slotId: String? = null,
-    @Json(name = "customer") val customer: OrderCustomer? = null,
-    @Json(name = "profiles") val profilesCustomer: OrderCustomer? = null,
-    @Json(name = "customer_name") val rawCustomerName: String? = null,
-    @Json(name = "customer_phone") val rawCustomerPhone: String? = null,
-    @Json(name = "delivery_address") val deliveryAddress: String? = null,
-    val status: String = "pending", // 'pending', 'confirmed', 'preparing', 'ready', 'out_for_delivery', 'delivered', 'cancelled', 'rejected'
-    val subtotal: Double? = null,
-    @Json(name = "discount_amount") val discountAmount: Double? = null,
-    @Json(name = "delivery_fee") val deliveryFee: Double? = null,
-    @Json(name = "handling_fee") val handlingFee: Double? = null,
-    @Json(name = "total_amount") val totalAmount: Double = 0.0,
-    @Json(name = "commission_amount") val commissionAmount: Double? = null,
-    @Json(name = "vendor_amount") val vendorAmount: Double? = null,
-    val notes: String? = null,
-    @Json(name = "payment_status") val paymentStatus: String? = null,
-    @Json(name = "payment_method") val paymentMethod: String? = null,
-    @Json(name = "cancellation_reason") val cancellationReason: String? = null,
-    @Json(name = "placed_at") val placedAt: String? = null,
-    @Json(name = "confirmed_at") val confirmedAt: String? = null,
-    @Json(name = "delivered_at") val deliveredAt: String? = null,
-    @Json(name = "cancelled_at") val cancelledAt: String? = null,
-    @Json(name = "city_id") val cityId: String? = null,
-    @Json(name = "created_at") val createdAt: String? = null,
-    @Json(name = "order_items") val orderItems: List<OrderItem>? = null
+data class Address(
+    val address_line: String? = null,
+    val landmark: String? = null,
+    val recipient_name: String? = null,
+    val phone: String? = null
 ) {
-    val customerName: String?
-        get() = customer?.fullName?.takeIf { it.isNotBlank() }
-            ?: profilesCustomer?.fullName?.takeIf { it.isNotBlank() }
-            ?: rawCustomerName?.takeIf { it.isNotBlank() }
-            ?: "Guest Customer"
-
-    val customerPhone: String?
-        get() = customer?.phone?.takeIf { it.isNotBlank() }
-            ?: profilesCustomer?.phone?.takeIf { it.isNotBlank() }
-            ?: rawCustomerPhone?.takeIf { it.isNotBlank() }
+    val addressLine: String? get() = address_line
+    val recipientName: String? get() = recipient_name
 }
+
+typealias OrderAddress = Address
 
 @JsonClass(generateAdapter = true)
 data class OrderItem(
     val id: String = "",
-    @Json(name = "order_id") val orderId: String = "",
-    @Json(name = "product_id") val productId: String? = null,
-    @Json(name = "vendor_id") val vendorId: String? = null,
-    @Json(name = "product_name") val productName: String? = null,
-    @Json(name = "variant_label") val variantLabel: String? = null,
-    val name: String? = null,
-    val quantity: Int = 1,
-    @Json(name = "unit_price") val unitPrice: Double = 0.0,
-    @Json(name = "total_price") val totalPrice: Double = 0.0
+    val product_name: String? = null,
+    val quantity: Double? = 1.0,
+    val unit_price: Double? = 0.0,
+    val total_price: Double? = 0.0,
+    val order_id: String? = null,
+    val product_id: String? = null,
+    val vendor_id: String? = null,
+    val variant_label: String? = null,
+    val name: String? = null
 ) {
-    val displayName: String
-        get() = productName ?: name ?: "Item"
+    val productName: String? get() = product_name ?: name
+    val unitPrice: Double get() = unit_price ?: 0.0
+    val totalPrice: Double get() = total_price ?: 0.0
+    val displayName: String get() = product_name ?: name ?: "Item"
+    val intQuantity: Int get() = quantity?.toInt() ?: 1
+}
+
+@JsonClass(generateAdapter = true)
+data class Order(
+    val id: String = "",
+    val order_number: String? = null,
+    val status: String? = "pending", // 'pending', 'confirmed', 'preparing', 'ready', 'out_for_delivery', 'delivered', 'cancelled', 'rejected'
+    val subtotal: Double? = null,
+    val discount_amount: Double? = null,
+    val delivery_fee: Double? = null,
+    val handling_fee: Double? = null,
+    val total_amount: Double? = 0.0,
+    val commission_amount: Double? = null,
+    val vendor_amount: Double? = null,
+    val notes: String? = null,
+    val payment_status: String? = null,
+    val payment_method: String? = null,
+    val created_at: String? = null,
+    val order_items: List<OrderItem>? = null,
+    val customer: Customer? = null,
+    val address: Address? = null,
+    val vendor_id: String? = null,
+    val customer_id: String? = null,
+    val delivery_partner_id: String? = null,
+    val address_id: String? = null,
+    val slot_id: String? = null,
+    val cancellation_reason: String? = null,
+    val placed_at: String? = null,
+    val city_id: String? = null
+) {
+    val orderNumber: String? get() = order_number
+    val discountAmount: Double? get() = discount_amount
+    val deliveryFee: Double? get() = delivery_fee
+    val handlingFee: Double? get() = handling_fee
+    val totalAmount: Double get() = total_amount ?: 0.0
+    val commissionAmount: Double? get() = commission_amount
+    val vendorAmount: Double? get() = vendor_amount
+    val paymentStatus: String? get() = payment_status
+    val paymentMethod: String? get() = payment_method
+    val cancellationReason: String? get() = cancellation_reason
+    val createdAt: String? get() = created_at
+    val orderItems: List<OrderItem>? get() = order_items
+
+    val customerName: String?
+        get() = customer?.full_name?.takeIf { it.isNotBlank() } ?: "Customer"
+
+    val customerPhone: String?
+        get() = customer?.phone?.takeIf { it.isNotBlank() }
+
+    val deliveryAddress: String?
+        get() {
+            val line = address?.address_line?.takeIf { it.isNotBlank() }
+            val landmark = address?.landmark?.takeIf { it.isNotBlank() }
+            return when {
+                line != null && landmark != null -> "$line, Landmark: $landmark"
+                line != null -> line
+                landmark != null -> landmark
+                else -> null
+            }
+        }
 }
 
 @JsonClass(generateAdapter = true)
 data class OrderStatusHistory(
-    val id: String = "",
-    @Json(name = "order_id") val orderId: String = "",
-    val status: String = "",
+    val id: String? = null,
+    @Json(name = "order_id") val orderId: String? = null,
+    val status: String? = null,
     val notes: String? = null,
     @Json(name = "created_at") val createdAt: String? = null
 )
@@ -286,16 +321,30 @@ data class Withdrawal(
 )
 
 @JsonClass(generateAdapter = true)
+data class ReviewCustomer(
+    @Json(name = "full_name") val fullName: String? = null
+)
+
+@JsonClass(generateAdapter = true)
 data class Review(
     val id: String = "",
     @Json(name = "vendor_id") val vendorId: String = "",
-    @Json(name = "customer_name") val customerName: String? = null,
+    @Json(name = "order_id") val orderId: String? = null,
+    @Json(name = "customer_id") val customerId: String? = null,
     val rating: Double = 5.0,
     val comment: String? = null,
-    @Json(name = "order_id") val orderId: String? = null,
     @Json(name = "order_number") val orderNumber: String? = null,
+    @Json(name = "customer") val customer: ReviewCustomer? = null,
+    @Json(name = "profiles") val profilesCustomer: ReviewCustomer? = null,
+    @Json(name = "customer_name") val rawCustomerName: String? = null,
     @Json(name = "created_at") val createdAt: String? = null
-)
+) {
+    val customerName: String?
+        get() = customer?.fullName?.takeIf { it.isNotBlank() }
+            ?: profilesCustomer?.fullName?.takeIf { it.isNotBlank() }
+            ?: rawCustomerName?.takeIf { it.isNotBlank() }
+            ?: "Customer"
+}
 
 @JsonClass(generateAdapter = true)
 data class OperatingHour(

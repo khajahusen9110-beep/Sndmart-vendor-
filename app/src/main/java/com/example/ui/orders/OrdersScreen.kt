@@ -68,7 +68,7 @@ fun OrdersScreen(
     }
 
     val filteredOrders = remember(state.orders, state.activeFilter, state.searchQuery) {
-        val visibleOrders = state.orders.filter { it.status.lowercase() != "pending" }
+        val visibleOrders = state.orders.filter { it.status?.lowercase() != "pending" }
         val byFilter = if (state.activeFilter == "ALL") visibleOrders
         else visibleOrders.filter { it.status.equals(state.activeFilter, ignoreCase = true) }
 
@@ -79,8 +79,11 @@ fun OrdersScreen(
             byFilter.filter { order ->
                 (order.orderNumber?.lowercase()?.contains(q) == true) ||
                 order.id.lowercase().contains(q) ||
+                (order.customer?.full_name?.lowercase()?.contains(q) == true) ||
                 (order.customerName?.lowercase()?.contains(q) == true) ||
+                (order.customer?.phone?.contains(q) == true) ||
                 (order.customerPhone?.contains(q) == true) ||
+                (order.address?.address_line?.lowercase()?.contains(q) == true) ||
                 (order.deliveryAddress?.lowercase()?.contains(q) == true)
             }
         }
@@ -152,7 +155,7 @@ fun OrdersScreen(
             ) {
                 items(ORDER_STATUS_FILTERS) { (filterKey, label) ->
                     val isSelected = state.activeFilter.equals(filterKey, ignoreCase = true)
-                    val visibleOrders = state.orders.filter { it.status.lowercase() != "pending" }
+                    val visibleOrders = state.orders.filter { it.status?.lowercase() != "pending" }
                     val count = if (filterKey == "ALL") visibleOrders.size
                     else visibleOrders.count { it.status.equals(filterKey, ignoreCase = true) }
 
@@ -282,8 +285,8 @@ fun OrdersScreen(
                 }
             } else {
                 items(filteredOrders, key = { it.id }) { order ->
-                    val isConfirmed = order.status.lowercase() == "confirmed"
-                    val isPreparing = order.status.lowercase() == "preparing"
+                    val isConfirmed = order.status?.lowercase() == "confirmed"
+                    val isPreparing = order.status?.lowercase() == "preparing"
 
                     Surface(
                         onClick = { onSelectOrder(order) },
@@ -330,7 +333,7 @@ fun OrdersScreen(
                                     }
                                 }
 
-                                StatusBadge(status = order.status)
+                                StatusBadge(status = order.status ?: "pending")
                             }
 
                             // Customer & Price
@@ -340,7 +343,8 @@ fun OrdersScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Column {
-                                    val customerDisplayName = order.customer?.fullName?.takeIf { it.isNotBlank() } 
+                                    val customerDisplayName = order.customer?.full_name?.takeIf { it.isNotBlank() }
+                                        ?: order.customer?.fullName?.takeIf { it.isNotBlank() } 
                                         ?: order.customerName 
                                         ?: "Guest Customer"
                                     Text(
@@ -365,23 +369,24 @@ fun OrdersScreen(
                             }
 
                             // Order items summary preview
-                            if (!order.orderItems.isNullOrEmpty()) {
+                            val summaryItems = order.orderItems
+                            if (!summaryItems.isNullOrEmpty()) {
                                 Surface(
                                     color = PolishBackgroundLight,
                                     shape = RoundedCornerShape(10.dp),
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
                                     Column(modifier = Modifier.padding(10.dp)) {
-                                        order.orderItems.take(3).forEach { item ->
+                                        summaryItems.take(3).forEach { item ->
                                             Text(
-                                                text = "• ${item.quantity}x ${item.displayName}",
+                                                text = "• ${item.intQuantity}x ${item.displayName}",
                                                 fontSize = 12.sp,
                                                 color = Slate700
                                             )
                                         }
-                                        if (order.orderItems.size > 3) {
+                                        if (summaryItems.size > 3) {
                                             Text(
-                                                text = "+ ${order.orderItems.size - 3} more items...",
+                                                text = "+ ${summaryItems.size - 3} more items...",
                                                 fontSize = 11.sp,
                                                 color = SprucePrimary,
                                                 fontWeight = FontWeight.SemiBold
@@ -397,7 +402,7 @@ fun OrdersScreen(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                when (order.status.lowercase()) {
+                                when (order.status?.lowercase()) {
                                     "confirmed" -> {
                                         Row(
                                             modifier = Modifier.fillMaxWidth(),
@@ -412,9 +417,9 @@ fun OrdersScreen(
                                             ) {
                                                 Text("Cancel")
                                             }
-                                            Button(
+                                             Button(
                                                 onClick = {
-                                                    onUpdateOrderStatus(order.id, "preparing", "Food is being prepared in kitchen", null) { _, _ -> }
+                                                    onUpdateOrderStatus(order.id, "preparing", null, null) { _, _ -> }
                                                 },
                                                 colors = ButtonDefaults.buttonColors(containerColor = SprucePrimary),
                                                 shape = RoundedCornerShape(12.dp),
@@ -429,7 +434,7 @@ fun OrdersScreen(
                                     "preparing" -> {
                                         Button(
                                             onClick = {
-                                                onUpdateOrderStatus(order.id, "ready", "Order packed and ready for delivery partner pickup", null) { _, _ -> }
+                                                onUpdateOrderStatus(order.id, "ready", null, null) { _, _ -> }
                                             },
                                             colors = ButtonDefaults.buttonColors(containerColor = PolishEmeraldDark),
                                             shape = RoundedCornerShape(12.dp),
@@ -534,7 +539,7 @@ fun OrdersScreen(
                         fontWeight = FontWeight.Bold,
                         color = Slate900
                     )
-                    StatusBadge(status = order.status)
+                    StatusBadge(status = order.status ?: "pending")
                 }
             },
             text = {
@@ -552,7 +557,8 @@ fun OrdersScreen(
                         ) {
                             Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Text("Customer Details", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Slate900)
-                                val detailCustName = order.customer?.fullName?.takeIf { it.isNotBlank() }
+                                val detailCustName = order.customer?.full_name?.takeIf { it.isNotBlank() }
+                                    ?: order.customer?.fullName?.takeIf { it.isNotBlank() }
                                     ?: order.customerName
                                     ?: "Guest Customer"
                                 Text("Name: $detailCustName", color = Slate700)
@@ -587,11 +593,19 @@ fun OrdersScreen(
                                         }
                                     }
                                 }
-                                if (!order.deliveryAddress.isNullOrBlank()) {
-                                    Text("Delivery Address: ${order.deliveryAddress}", fontSize = 12.sp, color = Slate500)
+                                val displayAddress = order.address?.address_line?.let { line ->
+                                    val lmk = order.address.landmark?.takeIf { it.isNotBlank() }
+                                    if (lmk != null) "$line (Near $lmk)" else line
+                                } ?: order.address?.addressLine?.let { line ->
+                                    val lmk = order.address.landmark?.takeIf { it.isNotBlank() }
+                                    if (lmk != null) "$line (Near $lmk)" else line
+                                } ?: order.deliveryAddress
+                                if (!displayAddress.isNullOrBlank()) {
+                                    Text("Delivery Address: $displayAddress", fontSize = 12.sp, color = Slate500)
                                 }
-                                if (!order.paymentStatus.isNullOrBlank()) {
-                                    Text("Payment: ${order.paymentStatus.uppercase()} (${order.paymentMethod ?: "Online"})", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Slate700)
+                                val payStatus = order.paymentStatus
+                                if (!payStatus.isNullOrBlank()) {
+                                    Text("Payment: ${payStatus.uppercase()} (${order.paymentMethod ?: "Online"})", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Slate700)
                                 }
                             }
                         }
@@ -602,25 +616,27 @@ fun OrdersScreen(
                         Text("Ordered Items", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Slate900)
                     }
 
-                    if (order.orderItems.isNullOrEmpty()) {
+                    val detailItems = order.orderItems
+                    if (detailItems.isNullOrEmpty()) {
                         item {
                             Text("No item details available", color = Slate500, fontSize = 12.sp)
                         }
                     } else {
-                        items(order.orderItems) { item ->
+                        items(detailItems) { item ->
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    text = "${item.quantity}x ${item.displayName}",
+                                    text = "${item.intQuantity}x ${item.displayName}",
                                     modifier = Modifier.weight(1f),
                                     fontWeight = FontWeight.Medium,
                                     color = Slate900
                                 )
+                                val itemTotal = item.totalPrice.takeIf { it > 0 } ?: (item.unitPrice * (item.quantity ?: 1.0))
                                 Text(
-                                    text = "₹${"%.2f".format(item.totalPrice.takeIf { it > 0 } ?: (item.unitPrice * item.quantity))}",
+                                    text = "₹${"%.2f".format(itemTotal)}",
                                     fontWeight = FontWeight.Bold,
                                     color = Slate900
                                 )
@@ -637,6 +653,56 @@ fun OrdersScreen(
                         ) {
                             Text("Total Order Amount:", fontWeight = FontWeight.Bold, color = Slate900)
                             Text("₹${"%.2f".format(order.totalAmount)}", fontWeight = FontWeight.Bold, color = PolishEmeraldDark, fontSize = 16.sp)
+                        }
+                    }
+
+                    // Order Status Timeline
+                    if (state.isLoadingHistory) {
+                        item {
+                            HorizontalDivider(color = PolishBorderLight)
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 8.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = SprucePrimary)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Loading timeline...", fontSize = 12.sp, color = Slate500)
+                            }
+                        }
+                    } else if (state.selectedOrderHistory.isNotEmpty()) {
+                        item {
+                            HorizontalDivider(color = PolishBorderLight)
+                            Text("Status Timeline", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Slate900)
+                        }
+                        items(state.selectedOrderHistory) { historyItem ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 2.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(8.dp)
+                                            .background(SprucePrimary, CircleShape)
+                                    )
+                                    Text(
+                                        text = (historyItem.status ?: "Updated").replace("_", " ").replaceFirstChar { it.uppercase() },
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 12.sp,
+                                        color = Slate700
+                                    )
+                                }
+                                val formattedTime = historyItem.createdAt?.let { formatStatusTime(it) } ?: ""
+                                if (formattedTime.isNotBlank()) {
+                                    Text(text = formattedTime, fontSize = 11.sp, color = Slate500)
+                                }
+                            }
                         }
                     }
                 }
@@ -722,4 +788,19 @@ fun OrdersScreen(
         )
     }
 }
+
+private fun formatStatusTime(isoString: String): String {
+    return try {
+        val parser = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US).apply {
+            timeZone = java.util.TimeZone.getTimeZone("UTC")
+        }
+        val cleanIso = isoString.take(19)
+        val date = parser.parse(cleanIso) ?: return ""
+        val formatter = java.text.SimpleDateFormat("MMM d, h:mm a", java.util.Locale.getDefault())
+        formatter.format(date)
+    } catch (_: Exception) {
+        ""
+    }
+}
+
 

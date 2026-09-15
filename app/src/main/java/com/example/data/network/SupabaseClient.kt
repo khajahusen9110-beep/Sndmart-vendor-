@@ -219,7 +219,26 @@ class SupabaseClient(private val sessionManager: SessionManager) {
         return count
     }
 
+    private val retryInterceptor = Interceptor { chain ->
+        val request = chain.request()
+        var response = chain.proceed(request)
+        var tryCount = 0
+        while (!response.isSuccessful && (response.code in listOf(502, 503, 504)) && request.method == "GET" && tryCount < 2) {
+            tryCount++
+            response.close()
+            try {
+                Thread.sleep(800L * tryCount)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                break
+            }
+            response = chain.proceed(request)
+        }
+        response
+    }
+
     private val okHttpClient = OkHttpClient.Builder()
+        .addInterceptor(retryInterceptor)
         .addInterceptor(authInterceptor)
         .authenticator(tokenAuthenticator)
         .addInterceptor(loggingInterceptor)

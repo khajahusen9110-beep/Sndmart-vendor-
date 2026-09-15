@@ -66,6 +66,11 @@ class VendorRepository(
             null
         }
 
+        val statusCode = response.code()
+        val isTransientOrAdvisory = statusCode in 500..599 || statusCode == 404 ||
+                defaultPrefix.contains("maintenance", ignoreCase = true) ||
+                defaultPrefix.contains("version", ignoreCase = true)
+
         if (!errorBody.isNullOrBlank()) {
             try {
                 val json = JSONObject(errorBody)
@@ -90,7 +95,11 @@ class VendorRepository(
                 }
 
                 if (fullDetail.isNotBlank()) {
-                    android.util.Log.e("VendorRepository", "Supabase error (prefix='$defaultPrefix'): $fullDetail | raw: $errorBody")
+                    if (isTransientOrAdvisory) {
+                        android.util.Log.w("VendorRepository", "Supabase advisory response (code=$statusCode, prefix='$defaultPrefix'): $fullDetail")
+                    } else {
+                        android.util.Log.e("VendorRepository", "Supabase error (prefix='$defaultPrefix'): $fullDetail | raw: $errorBody")
+                    }
                     return if (defaultPrefix.isBlank() || fullDetail.startsWith(defaultPrefix, ignoreCase = true)) {
                         fullDetail
                     } else {
@@ -100,7 +109,11 @@ class VendorRepository(
             } catch (_: Exception) {
                 val trimmed = errorBody.trim()
                 if (trimmed.isNotBlank()) {
-                    android.util.Log.e("VendorRepository", "Raw error (prefix='$defaultPrefix'): $trimmed")
+                    if (isTransientOrAdvisory) {
+                        android.util.Log.w("VendorRepository", "Supabase advisory raw (code=$statusCode, prefix='$defaultPrefix'): $trimmed")
+                    } else {
+                        android.util.Log.e("VendorRepository", "Raw error (prefix='$defaultPrefix'): $trimmed")
+                    }
                     return if (defaultPrefix.isBlank() || trimmed.startsWith(defaultPrefix, ignoreCase = true)) {
                         trimmed
                     } else {
@@ -548,12 +561,12 @@ class VendorRepository(
                 offset = offset
             )
 
-            // Defensive fallback: If orders_customer_id_fkey relationship fails to resolve
+            // Defensive fallback: If address relationship fails to resolve
             if (!response.isSuccessful && response.code() == 400) {
-                val errorMsg = extractErrorMessage(response, "")
-                if (errorMsg.contains("orders_customer_id_fkey") || errorMsg.contains("relationship") || errorMsg.contains("PGRST200")) {
-                    android.util.Log.w("VendorRepository", "orders_customer_id_fkey not resolved, retrying with customer:profiles: $errorMsg")
-                    val fallbackSelect = "id,order_number,status,subtotal,discount_amount,delivery_fee,handling_fee,total_amount,commission_amount,vendor_amount,notes,payment_status,payment_method,delivery_address,created_at,order_items(id,product_name,quantity,unit_price,total_price),customer:profiles(full_name,phone)"
+                val errorBodyStr = try { response.errorBody()?.string() } catch (_: Exception) { null }
+                if (errorBodyStr?.contains("orders_address_id_fkey") == true || errorBodyStr?.contains("customer_addresses") == true || errorBodyStr?.contains("relationship") == true || errorBodyStr?.contains("PGRST200") == true) {
+                    android.util.Log.w("VendorRepository", "Address join not resolved, retrying without constraint hint: $errorBodyStr")
+                    val fallbackSelect = "id,order_number,status,subtotal,discount_amount,delivery_fee,handling_fee,total_amount,commission_amount,vendor_amount,notes,payment_status,payment_method,created_at,customer_id,address_id,order_items(id,product_name,quantity,unit_price,total_price),address:customer_addresses(address_line,landmark,recipient_name,phone)"
                     response = api.getOrders(
                         vendorIdFilter = "eq.$vendorId",
                         statusFilter = "in.(confirmed,preparing,ready,out_for_delivery,delivered,cancelled,rejected)",
@@ -563,18 +576,15 @@ class VendorRepository(
                     )
 
                     if (!response.isSuccessful && response.code() == 400) {
-                        val errorMsg2 = extractErrorMessage(response, "")
-                        if (errorMsg2.contains("profiles") || errorMsg2.contains("relationship") || errorMsg2.contains("PGRST200")) {
-                            android.util.Log.w("VendorRepository", "Profiles join not resolved, retrying without customer join: $errorMsg2")
-                            val baseSelect = "id,order_number,status,subtotal,discount_amount,delivery_fee,handling_fee,total_amount,commission_amount,vendor_amount,notes,payment_status,payment_method,delivery_address,created_at,order_items(id,product_name,quantity,unit_price,total_price)"
-                            response = api.getOrders(
-                                vendorIdFilter = "eq.$vendorId",
-                                statusFilter = "in.(confirmed,preparing,ready,out_for_delivery,delivered,cancelled,rejected)",
-                                select = baseSelect,
-                                limit = limit,
-                                offset = offset
-                            )
-                        }
+                        android.util.Log.w("VendorRepository", "Customer addresses join not resolved, retrying base query")
+                        val baseSelect = "id,order_number,status,subtotal,discount_amount,delivery_fee,handling_fee,total_amount,commission_amount,vendor_amount,notes,payment_status,payment_method,created_at,customer_id,address_id,order_items(id,product_name,quantity,unit_price,total_price)"
+                        response = api.getOrders(
+                            vendorIdFilter = "eq.$vendorId",
+                            statusFilter = "in.(confirmed,preparing,ready,out_for_delivery,delivered,cancelled,rejected)",
+                            select = baseSelect,
+                            limit = limit,
+                            offset = offset
+                        )
                     }
                 }
             }
@@ -582,8 +592,36 @@ class VendorRepository(
             if (response.isSuccessful) {
                 // Defensive filter: Vendor never sees pending orders until City Admin accepts
                 val confirmedAndActiveOrders = (response.body() ?: emptyList())
-                    .filter { it.status.lowercase() != "pending" }
-                Resource.Success(confirmedAndActiveOrders)
+                    .filter { it.status?.lowercase() != "pending" }
+
+                // Enrich orders with customer profiles if missing
+                val enrichedOrders = confirmedAndActiveOrders.toMutableList()
+                val missingCustomerIds = enrichedOrders
+                    .filter { it.customer == null && !it.customer_id.isNullOrBlank() }
+                    .mapNotNull { it.customer_id }
+                    .distinct()
+
+                if (missingCustomerIds.isNotEmpty()) {
+                    try {
+                        val filter = "in.(${missingCustomerIds.joinToString(",")})"
+                        val profRes = api.getProfiles(idFilter = filter)
+                        if (profRes.isSuccessful && !profRes.body().isNullOrEmpty()) {
+                            val profMap = profRes.body()!!.filter { !it.id.isNullOrBlank() }.associateBy { it.id!! }
+                            for (i in enrichedOrders.indices) {
+                                val ord = enrichedOrders[i]
+                                val cid = ord.customer_id
+                                if (ord.customer == null && cid != null && profMap.containsKey(cid)) {
+                                    val p = profMap[cid]!!
+                                    enrichedOrders[i] = ord.copy(customer = Customer(id = p.id, full_name = p.full_name, phone = p.phone))
+                                }
+                            }
+                        }
+                    } catch (_: Exception) {
+                        // Non-blocking enrichment
+                    }
+                }
+
+                Resource.Success(enrichedOrders)
             } else {
                 Resource.Error(extractErrorMessage(response, "Failed to load orders"), response.code())
             }
@@ -596,17 +634,34 @@ class VendorRepository(
         try {
             var response = api.getOrderById("eq.$orderId")
             if (!response.isSuccessful && response.code() == 400) {
-                val errorMsg = extractErrorMessage(response, "")
-                if (errorMsg.contains("orders_customer_id_fkey") || errorMsg.contains("relationship")) {
-                    response = api.getOrderById("eq.$orderId", select = "*,order_items(*)")
+                val errorBodyStr = try { response.errorBody()?.string() } catch (_: Exception) { null }
+                if (errorBodyStr?.contains("orders_address_id_fkey") == true || errorBodyStr?.contains("customer_addresses") == true || errorBodyStr?.contains("relationship") == true) {
+                    response = api.getOrderById(
+                        "eq.$orderId",
+                        select = "*,order_items(*),address:customer_addresses(address_line,landmark,recipient_name,phone)"
+                    )
+                    if (!response.isSuccessful && response.code() == 400) {
+                        response = api.getOrderById("eq.$orderId", select = "*,order_items(*)")
+                    }
                 }
             }
             if (response.isSuccessful) {
-                val order = response.body()?.firstOrNull()
+                var order = response.body()?.firstOrNull()
                 if (order != null) {
-                    if (order.status.lowercase() == "pending") {
+                    if (order.status?.lowercase() == "pending") {
                         Resource.Error("Order is still pending City Admin acceptance")
                     } else {
+                        if (order.customer == null && !order.customer_id.isNullOrBlank()) {
+                            try {
+                                val profRes = api.getProfiles("eq.${order.customer_id}")
+                                val profile = profRes.body()?.firstOrNull()
+                                if (profile != null) {
+                                    order = order.copy(customer = Customer(id = profile.id, full_name = profile.full_name, phone = profile.phone))
+                                }
+                            } catch (_: Exception) {
+                                // Non-blocking enrichment
+                            }
+                        }
                         Resource.Success(order)
                     }
                 } else Resource.Error("Order not found")
@@ -625,46 +680,35 @@ class VendorRepository(
         cancellationReason: String? = null
     ): Resource<Order> = withContext(Dispatchers.IO) {
         try {
-            val orderUpdates = mutableMapOf<String, Any?>("status" to newStatus)
-            val nowIso = getCurrentIsoDate()
-            when (newStatus.lowercase()) {
-                "confirmed" -> orderUpdates["confirmed_at"] = nowIso
-                "preparing" -> orderUpdates["preparing_at"] = nowIso
-                "ready" -> orderUpdates["ready_at"] = nowIso
-                "delivered" -> orderUpdates["delivered_at"] = nowIso
-                "cancelled", "rejected" -> orderUpdates["cancelled_at"] = nowIso
-            }
-            if (!notes.isNullOrEmpty()) {
-                orderUpdates["notes"] = notes
-            }
-            if (!cancellationReason.isNullOrEmpty()) {
-                orderUpdates["cancellation_reason"] = cancellationReason
-            }
+            // Simplify update to ONLY change status on orders table
+            // Per schema rules: orders table does NOT have per-status timestamp columns
+            // (e.g., preparing_at, confirmed_at, ready_at, etc.).
+            // Order status timestamps are automatically recorded in order_status_history by database trigger.
+            val orderUpdates = mapOf<String, Any?>("status" to newStatus)
 
             val response = api.updateOrderStatus("eq.$orderId", orderUpdates)
             if (response.isSuccessful) {
-                // Also insert into order_status_history
-                try {
-                    api.insertOrderStatusHistory(
-                        mapOf(
-                            "order_id" to orderId,
-                            "status" to newStatus,
-                            "notes" to (notes ?: cancellationReason ?: "Status changed to $newStatus"),
-                            "created_at" to nowIso
-                        )
-                    )
-                } catch (_: Exception) {
-                    // non-fatal
-                }
-
                 val updatedOrder = response.body()?.firstOrNull()
                 if (updatedOrder != null) Resource.Success(updatedOrder)
-                else Resource.Success(Order(id = orderId, status = newStatus))
+                else Resource.Success(Order(id = orderId, status = newStatus, cancellation_reason = cancellationReason))
             } else {
                 Resource.Error(extractErrorMessage(response, "Failed to update order status"), response.code())
             }
         } catch (e: Exception) {
             Resource.Error(e.localizedMessage ?: "Error updating order status")
+        }
+    }
+
+    suspend fun getOrderStatusHistory(orderId: String): Resource<List<OrderStatusHistory>> = withContext(Dispatchers.IO) {
+        try {
+            val response = api.getOrderStatusHistory(orderIdFilter = "eq.$orderId")
+            if (response.isSuccessful) {
+                Resource.Success(response.body() ?: emptyList())
+            } else {
+                Resource.Error(extractErrorMessage(response, "Failed to load order status history"), response.code())
+            }
+        } catch (e: Exception) {
+            Resource.Error(e.localizedMessage ?: "Error loading order status history")
         }
     }
 
@@ -740,7 +784,18 @@ class VendorRepository(
     // Reviews (Rule 1: Paginated 20 at a time)
     suspend fun getReviews(vendorId: String, limit: Int = 20, offset: Int = 0): Resource<List<Review>> = withContext(Dispatchers.IO) {
         try {
-            val response = api.getReviews(vendorIdFilter = "eq.$vendorId", limit = limit, offset = offset)
+            var response = api.getReviews(vendorIdFilter = "eq.$vendorId", limit = limit, offset = offset)
+            if (!response.isSuccessful && response.code() == 400) {
+                val errorBodyStr = try { response.errorBody()?.string() } catch (_: Exception) { null }
+                if (errorBodyStr?.contains("vendor_reviews_customer_id_fkey") == true || errorBodyStr?.contains("relationship") == true || errorBodyStr?.contains("PGRST200") == true) {
+                    val fallbackSelect = "id,vendor_id,order_id,customer_id,rating,comment,created_at,customer:profiles(full_name)"
+                    response = api.getReviews(vendorIdFilter = "eq.$vendorId", select = fallbackSelect, limit = limit, offset = offset)
+                    if (!response.isSuccessful && response.code() == 400) {
+                        val baseSelect = "id,vendor_id,order_id,customer_id,rating,comment,created_at"
+                        response = api.getReviews(vendorIdFilter = "eq.$vendorId", select = baseSelect, limit = limit, offset = offset)
+                    }
+                }
+            }
             if (response.isSuccessful) {
                 Resource.Success(response.body() ?: emptyList())
             } else {
@@ -1477,10 +1532,10 @@ class VendorRepository(
             if (res.isSuccessful) {
                 Resource.Success(res.body()?.firstOrNull())
             } else {
-                Resource.Error(extractErrorMessage(res, "Failed to check app version"), res.code())
+                Resource.Error(extractErrorMessage(res, "App version check notice"), res.code())
             }
         } catch (e: Exception) {
-            Resource.Error(e.localizedMessage ?: "App version check error")
+            Resource.Error(e.localizedMessage ?: "App version check notice")
         }
     }
 
@@ -1490,10 +1545,10 @@ class VendorRepository(
             if (res.isSuccessful) {
                 Resource.Success(res.body()?.firstOrNull())
             } else {
-                Resource.Error(extractErrorMessage(res, "Failed to check maintenance mode"), res.code())
+                Resource.Error(extractErrorMessage(res, "Maintenance mode check notice"), res.code())
             }
         } catch (e: Exception) {
-            Resource.Error(e.localizedMessage ?: "Maintenance check error")
+            Resource.Error(e.localizedMessage ?: "Maintenance check notice")
         }
     }
 }

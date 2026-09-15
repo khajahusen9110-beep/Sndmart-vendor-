@@ -76,14 +76,46 @@ class IncomingOrderActivity : ComponentActivity() {
         setupLockscreenFlags()
         initVibrator()
 
-        val orderId = intent.getStringExtra(EXTRA_ORDER_ID) ?: "ord_${System.currentTimeMillis().toString().takeLast(6)}"
-        val orderNumber = intent.getStringExtra(EXTRA_ORDER_NUMBER) ?: orderId.takeLast(6).uppercase()
-        val customerName = intent.getStringExtra(EXTRA_CUSTOMER_NAME) ?: "Customer"
+        val orderId = intent.getStringExtra(EXTRA_ORDER_ID)
+            ?: intent.getStringExtra("order_id")
+            ?: intent.getStringExtra("orderId")
+            ?: intent.getStringExtra("id")
+            ?: "ord_${System.currentTimeMillis().toString().takeLast(6)}"
+        val orderNumber = intent.getStringExtra(EXTRA_ORDER_NUMBER)
+            ?: intent.getStringExtra("order_number")
+            ?: intent.getStringExtra("orderNumber")
+            ?: orderId.takeLast(6).uppercase()
+        val customerName = intent.getStringExtra(EXTRA_CUSTOMER_NAME)
+            ?: intent.getStringExtra("customer_name")
+            ?: intent.getStringExtra("customerName")
+            ?: intent.getStringExtra("title")
+            ?: "Customer"
         val customerPhone = intent.getStringExtra(EXTRA_CUSTOMER_PHONE)
-        val itemsCount = intent.getIntExtra(EXTRA_ITEMS_COUNT, 1)
-        val totalAmount = intent.getDoubleExtra(EXTRA_TOTAL_AMOUNT, 0.0)
+            ?: intent.getStringExtra("customer_phone")
+            ?: intent.getStringExtra("customerPhone")
+            ?: intent.getStringExtra("phone")
+        val itemsCount = intent.getIntExtra(
+            EXTRA_ITEMS_COUNT,
+            intent.getStringExtra("items_count")?.toIntOrNull()
+                ?: intent.getStringExtra("itemsCount")?.toIntOrNull()
+                ?: 1
+        )
+        val totalAmount = intent.getDoubleExtra(
+            EXTRA_TOTAL_AMOUNT,
+            intent.getStringExtra("total_amount")?.toDoubleOrNull()
+                ?: intent.getStringExtra("totalAmount")?.toDoubleOrNull()
+                ?: intent.getStringExtra("amount")?.toDoubleOrNull()
+                ?: 0.0
+        )
         val deliveryAddress = intent.getStringExtra(EXTRA_DELIVERY_ADDRESS)
+            ?: intent.getStringExtra("delivery_address")
+            ?: intent.getStringExtra("deliveryAddress")
+            ?: intent.getStringExtra("address")
         val itemsSummary = intent.getStringExtra(EXTRA_ITEMS_SUMMARY)
+            ?: intent.getStringExtra("items_summary")
+            ?: intent.getStringExtra("itemsSummary")
+            ?: intent.getStringExtra("body")
+            ?: intent.getStringExtra("message")
 
         if (sessionManager.isSoundAlertEnabled) {
             startAudioAlert()
@@ -232,7 +264,7 @@ class IncomingOrderActivity : ComponentActivity() {
             try {
                 val supabaseClient = SupabaseClient(sessionManager)
                 val repository = VendorRepository(supabaseClient, sessionManager)
-                val res = repository.updateOrderStatus(orderId, "preparing", notes = "Preparation started via Full-Screen Alert")
+                val res = repository.updateOrderStatus(orderId, "preparing")
                 withContext(Dispatchers.Main) {
                     if (res is Resource.Success) {
                         Toast.makeText(applicationContext, "Order #$orderId moved to kitchen preparation!", Toast.LENGTH_SHORT).show()
@@ -279,12 +311,25 @@ class IncomingOrderActivity : ComponentActivity() {
         }
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        setupLockscreenFlags()
+        if (sessionManager.isSoundAlertEnabled) {
+            startAudioAlert()
+            startVibrationAlert()
+        }
+        recreate()
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         stopAlerts()
         activityScope.cancel()
     }
 }
+
+typealias IncomingOrderAlertActivity = IncomingOrderActivity
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

@@ -78,6 +78,16 @@ object NotificationHelper {
             putExtra(IncomingOrderActivity.EXTRA_TOTAL_AMOUNT, totalAmount)
             putExtra(IncomingOrderActivity.EXTRA_DELIVERY_ADDRESS, deliveryAddress)
             putExtra(IncomingOrderActivity.EXTRA_ITEMS_SUMMARY, itemsSummary)
+            putExtra("order_id", orderId)
+            putExtra("orderId", orderId)
+            putExtra("title", customerName)
+            putExtra("body", itemsSummary ?: "New Order")
+        }
+
+        try {
+            context.startActivity(fullScreenIntent)
+        } catch (_: Exception) {
+            // Foreground launch might be restricted if invoked from strict background context
         }
 
         val fullScreenPendingIntent = PendingIntent.getActivity(

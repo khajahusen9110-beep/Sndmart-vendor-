@@ -40,6 +40,12 @@ interface SupabaseApi {
     ): Response<List<City>>
 
     // 1.2 Profiles table
+    @GET("rest/v1/profiles")
+    suspend fun getProfiles(
+        @Query("id") idFilter: String,
+        @Query("select") select: String = "id,full_name,phone"
+    ): Response<List<Customer>>
+
     @POST("rest/v1/profiles")
     @Headers("Prefer: return=representation,resolution=merge-duplicates")
     suspend fun insertProfile(
@@ -121,12 +127,12 @@ interface SupabaseApi {
         @Query("id") productIdFilter: String
     ): Response<Unit>
 
-    // 5. Orders table (with nested order_items and joined customer profile)
+    // 5. Orders table (with nested order_items and customer address)
     @GET("rest/v1/orders")
     suspend fun getOrders(
         @Query("vendor_id") vendorIdFilter: String,
         @Query("status") statusFilter: String = "in.(confirmed,preparing,ready,out_for_delivery,delivered,cancelled,rejected)",
-        @Query("select") select: String = "id,order_number,status,subtotal,discount_amount,delivery_fee,handling_fee,total_amount,commission_amount,vendor_amount,notes,payment_status,payment_method,delivery_address,created_at,order_items(id,product_name,quantity,unit_price,total_price),customer:profiles!orders_customer_id_fkey(full_name,phone)",
+        @Query("select") select: String = "id,order_number,status,subtotal,discount_amount,delivery_fee,handling_fee,total_amount,commission_amount,vendor_amount,notes,payment_status,payment_method,created_at,customer_id,address_id,order_items(id,product_name,quantity,unit_price,total_price),address:customer_addresses!orders_address_id_fkey(address_line,landmark,recipient_name,phone)",
         @Query("order") order: String = "created_at.desc",
         @Query("limit") limit: Int? = 20,
         @Query("offset") offset: Int? = 0
@@ -135,7 +141,7 @@ interface SupabaseApi {
     @GET("rest/v1/orders")
     suspend fun getOrderById(
         @Query("id") idFilter: String,
-        @Query("select") select: String = "*,order_items(*),customer:profiles!orders_customer_id_fkey(full_name,phone)"
+        @Query("select") select: String = "*,order_items(*),address:customer_addresses!orders_address_id_fkey(address_line,landmark,recipient_name,phone)"
     ): Response<List<Order>>
 
     @PATCH("rest/v1/orders")
@@ -146,6 +152,13 @@ interface SupabaseApi {
     ): Response<List<Order>>
 
     // 6. Order Status History
+    @GET("rest/v1/order_status_history")
+    suspend fun getOrderStatusHistory(
+        @Query("order_id") orderIdFilter: String,
+        @Query("select") select: String = "status,created_at",
+        @Query("order") order: String = "created_at.asc"
+    ): Response<List<OrderStatusHistory>>
+
     @POST("rest/v1/order_status_history")
     @Headers("Prefer: return=representation")
     suspend fun insertOrderStatusHistory(
@@ -156,7 +169,7 @@ interface SupabaseApi {
     @GET("rest/v1/vendor_wallet_transactions")
     suspend fun getWalletTransactions(
         @Query("vendor_id") vendorIdFilter: String,
-        @Query("select") select: String = "id,vendor_id,amount,type,description,reference_id,created_at",
+        @Query("select") select: String = "id,vendor_id,order_id,type,amount,description,created_at",
         @Query("order") order: String = "created_at.desc",
         @Query("limit") limit: Int? = 20,
         @Query("offset") offset: Int? = 0
@@ -166,7 +179,7 @@ interface SupabaseApi {
     @GET("rest/v1/vendor_payouts")
     suspend fun getPayouts(
         @Query("vendor_id") vendorIdFilter: String,
-        @Query("select") select: String = "id,vendor_id,amount,status,reference_number,notes,created_at",
+        @Query("select") select: String = "id,vendor_id,order_id,gross_amount,commission_amount,net_amount,status,paid_at,created_at",
         @Query("order") order: String = "created_at.desc",
         @Query("limit") limit: Int? = 20,
         @Query("offset") offset: Int? = 0
@@ -176,7 +189,7 @@ interface SupabaseApi {
     @GET("rest/v1/vendor_withdrawals")
     suspend fun getWithdrawals(
         @Query("vendor_id") vendorIdFilter: String,
-        @Query("select") select: String = "id,vendor_id,city_id,amount,status,admin_notes,vendor_note,created_at",
+        @Query("select") select: String = "id,vendor_id,city_id,amount,status,note,commission_amount,net_payable_amount,paid_at,created_at",
         @Query("order") order: String = "created_at.desc",
         @Query("limit") limit: Int? = 20,
         @Query("offset") offset: Int? = 0
@@ -192,7 +205,7 @@ interface SupabaseApi {
     @GET("rest/v1/vendor_reviews")
     suspend fun getReviews(
         @Query("vendor_id") vendorIdFilter: String,
-        @Query("select") select: String = "id,vendor_id,order_id,customer_name,rating,comment,created_at",
+        @Query("select") select: String = "id,vendor_id,order_id,customer_id,rating,comment,created_at,customer:profiles!vendor_reviews_customer_id_fkey(full_name)",
         @Query("order") order: String = "created_at.desc",
         @Query("limit") limit: Int? = 20,
         @Query("offset") offset: Int? = 0
