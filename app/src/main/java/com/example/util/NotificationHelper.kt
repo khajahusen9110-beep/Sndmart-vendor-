@@ -10,6 +10,8 @@ import android.media.AudioAttributes
 import android.media.RingtoneManager
 import android.net.Uri
 import android.os.Build
+import android.provider.Settings
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.example.MainActivity
@@ -84,12 +86,6 @@ object NotificationHelper {
             putExtra("body", itemsSummary ?: "New Order")
         }
 
-        try {
-            context.startActivity(fullScreenIntent)
-        } catch (_: Exception) {
-            // Foreground launch might be restricted if invoked from strict background context
-        }
-
         val fullScreenPendingIntent = PendingIntent.getActivity(
             context,
             orderId.hashCode(),
@@ -140,13 +136,47 @@ object NotificationHelper {
                 fullScreenPendingIntent
             )
 
+        // Permission check before dispatching notification
+        val overlayAllowed = hasOverlayPermission(context)
+        val fullScreenAllowed = hasFullScreenIntentPermission(context)
+        val notificationsAllowed = NotificationManagerCompat.from(context).areNotificationsEnabled()
+
+        Log.d(
+            "NotificationHelper",
+            "Dispatching incoming order notification: overlayAllowed=$overlayAllowed, " +
+                "fullScreenAllowed=$fullScreenAllowed, notificationsAllowed=$notificationsAllowed"
+        )
+
         try {
             val notificationManager = NotificationManagerCompat.from(context)
             notificationManager.notify(NOTIFICATION_ID_INCOMING_ORDER, builder.build())
         } catch (e: SecurityException) {
-            // Missing POST_NOTIFICATIONS on Android 13+
+            Log.w("NotificationHelper", "Missing POST_NOTIFICATIONS permission: ${e.message}")
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e("NotificationHelper", "Failed to post incoming order notification", e)
+        }
+    }
+
+    /**
+     * Checks if the app has the 'Display over other apps' (SYSTEM_ALERT_WINDOW) permission.
+     */
+    fun hasOverlayPermission(context: Context): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            Settings.canDrawOverlays(context)
+        } else {
+            true
+        }
+    }
+
+    /**
+     * Checks if the app has the USE_FULL_SCREEN_INTENT permission on Android 14+ (API 34+).
+     */
+    fun hasFullScreenIntentPermission(context: Context): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+            nm?.canUseFullScreenIntent() ?: true
+        } else {
+            true
         }
     }
 

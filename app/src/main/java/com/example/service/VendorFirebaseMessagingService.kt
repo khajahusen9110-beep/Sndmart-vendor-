@@ -1,11 +1,9 @@
 package com.example.service
 
-import android.content.Intent
 import android.util.Log
 import com.example.data.local.SessionManager
 import com.example.data.network.SupabaseClient
 import com.example.data.repository.VendorRepository
-import com.example.ui.orders.IncomingOrderActivity
 import com.example.util.NotificationHelper
 import com.example.util.OrderEventBus
 import com.google.firebase.messaging.FirebaseMessagingService
@@ -62,39 +60,10 @@ class VendorFirebaseMessagingService : FirebaseMessagingService() {
         val deliveryAddress = data["delivery_address"] ?: data["deliveryAddress"] ?: data["address"]
         val itemsSummary = data["items_summary"] ?: data["itemsSummary"] ?: data["items"] ?: body
 
-        // Always launch the full-screen alert Activity directly - do not depend on
-        // the system notification tray to do this, since that behavior differs
-        // between foreground and background app states.
-        val fullScreenIntent = Intent(this, IncomingOrderActivity::class.java).apply {
-            putExtra("order_id", orderId)
-            putExtra("orderId", orderId)
-            putExtra("title", title)
-            putExtra("body", body)
-            putExtra(IncomingOrderActivity.EXTRA_ORDER_ID, orderId)
-            putExtra(IncomingOrderActivity.EXTRA_ORDER_NUMBER, orderNumber)
-            putExtra(IncomingOrderActivity.EXTRA_CUSTOMER_NAME, customerName)
-            putExtra(IncomingOrderActivity.EXTRA_CUSTOMER_PHONE, customerPhone)
-            putExtra(IncomingOrderActivity.EXTRA_ITEMS_COUNT, itemsCount)
-            putExtra(IncomingOrderActivity.EXTRA_TOTAL_AMOUNT, totalAmount)
-            putExtra(IncomingOrderActivity.EXTRA_DELIVERY_ADDRESS, deliveryAddress)
-            putExtra(IncomingOrderActivity.EXTRA_ITEMS_SUMMARY, itemsSummary)
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
-        }
-
-        try {
-            startActivity(fullScreenIntent)
-            Log.d("VendorFCMService", "Directly launched full-screen alert activity for order $orderId")
-        } catch (e: Exception) {
-            Log.e("VendorFCMService", "Could not directly start full-screen alert activity", e)
-        }
-
         // Notify active screens (like OrdersScreen) to immediately reload data
         OrderEventBus.notifyNewOrder(orderId)
 
-        // Still also post the system notification (for when the app is killed/backgrounded,
-        // and as a fallback record in the notification tray) - keep the existing
-        // NotificationCompat.Builder + setFullScreenIntent code from before, in addition
-        // to the direct startActivity call above.
+        // Post high-priority incoming order alert notification with setFullScreenIntent
         NotificationHelper.showIncomingOrderAlert(
             context = applicationContext,
             orderId = orderId,

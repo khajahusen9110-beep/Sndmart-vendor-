@@ -23,6 +23,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
 import android.widget.Toast
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -36,6 +39,7 @@ import com.example.ui.menu.ImageUploadDropzone
 import com.example.ui.menu.SelectedImageFile
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.ProfileUiState
+import com.example.util.NotificationHelper
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -677,6 +681,65 @@ fun StoreProfileScreen(
                                 Icon(imageVector = Icons.Default.FlashOn, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text("Test Swiggy Alert", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+
+                        // Full-Screen / Overlay permission info
+                        val hasOverlay = NotificationHelper.hasOverlayPermission(context)
+                        val hasFullScreenIntent = NotificationHelper.hasFullScreenIntentPermission(context)
+                        if (!hasOverlay || !hasFullScreenIntent) {
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = PolishAmberLight,
+                                border = BorderStroke(1.dp, PolishAmber.copy(alpha = 0.3f)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.WarningAmber,
+                                            contentDescription = null,
+                                            tint = PolishAmberDark,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Text(
+                                            text = "Full-Screen Alert Permission",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 12.sp,
+                                            color = PolishAmberDark
+                                        )
+                                    }
+                                    Text(
+                                        text = "To let order alerts pop up full-screen over other apps and locked screen reliably, allow 'Display over other apps' in device settings.",
+                                        fontSize = 11.sp,
+                                        color = Slate700,
+                                        lineHeight = 15.sp
+                                    )
+                                    OutlinedButton(
+                                        onClick = {
+                                            try {
+                                                val intent = Intent(
+                                                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                                    Uri.parse("package:${context.packageName}")
+                                                )
+                                                context.startActivity(intent)
+                                            } catch (e: Exception) {
+                                                Toast.makeText(context, "Open App Settings to enable Display over other apps", Toast.LENGTH_SHORT).show()
+                                            }
+                                        },
+                                        shape = RoundedCornerShape(8.dp),
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                        modifier = Modifier.height(32.dp)
+                                    ) {
+                                        Text("Open Settings", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                    }
+                                }
                             }
                         }
 
