@@ -130,11 +130,6 @@ object NotificationHelper {
             .setContentIntent(contentPendingIntent)
             .setAutoCancel(true)
             .setOngoing(true)
-            .addAction(
-                android.R.drawable.ic_input_add,
-                "START PREPARING",
-                fullScreenPendingIntent
-            )
 
         // Permission check before dispatching notification
         val overlayAllowed = hasOverlayPermission(context)
@@ -154,6 +149,20 @@ object NotificationHelper {
             Log.w("NotificationHelper", "Missing POST_NOTIFICATIONS permission: ${e.message}")
         } catch (e: Exception) {
             Log.e("NotificationHelper", "Failed to post incoming order notification", e)
+        }
+
+        // Android only auto-launches setFullScreenIntent when the screen is OFF/locked.
+        // If the screen is already on (vendor actively using the phone), the OS silently
+        // downgrades it to a plain heads-up notification instead. To guarantee the
+        // full-screen order alert pops up immediately in that case too, launch the
+        // activity directly here. This background-start is allowed because the app holds
+        // the "Display over other apps" (SYSTEM_ALERT_WINDOW) permission.
+        if (overlayAllowed) {
+            try {
+                context.startActivity(fullScreenIntent)
+            } catch (e: Exception) {
+                Log.e("NotificationHelper", "Failed to directly launch full-screen order alert", e)
+            }
         }
     }
 
