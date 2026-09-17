@@ -43,11 +43,11 @@ class VendorApplication : Application(), ImageLoaderFactory {
                 FirebaseApp.initializeApp(this)
             }
             try {
-                FirebaseMessaging.getInstance().isAutoInitEnabled = true
+                FirebaseMessaging.getInstance().isAutoInitEnabled = false
             } catch (t: Throwable) {
                 Log.w("VendorApplication", "Notice configuring FirebaseMessaging autoInit: ${t.message}")
             }
-            Log.d("VendorApplication", "FirebaseApp initialized successfully with auto-init enabled")
+            Log.d("VendorApplication", "FirebaseApp initialized successfully (auto-init disabled)")
         } catch (e: Exception) {
             Log.w("VendorApplication", "Firebase initialization notice: ${e.message}")
         }
