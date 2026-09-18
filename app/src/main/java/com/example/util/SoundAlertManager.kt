@@ -3,6 +3,7 @@ package com.example.util
 import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioManager
+import android.media.MediaPlayer
 import android.media.RingtoneManager
 import android.media.ToneGenerator
 import android.os.Build
@@ -11,6 +12,7 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import android.util.Log
+import com.example.R
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -30,6 +32,7 @@ class SoundAlertManager(private val context: Context) {
     }
 
     private var toneGenerator: ToneGenerator? = null
+    private var activeMediaPlayer: MediaPlayer? = null
     private var repeatingAlertJob: Job? = null
     private var alertRepeatCount = 0
     private val maxRepeatCount = 5
@@ -43,28 +46,65 @@ class SoundAlertManager(private val context: Context) {
     }
 
     /**
-     * Play a single notification sound chime and vibration.
+     * Play the 10-second order alert ringtone sound and vibration.
      */
     fun playNewOrderSound(vibrate: Boolean = true) {
         try {
-            // 1. Play Tone Chime
-            if (toneGenerator != null) {
-                try {
-                    toneGenerator?.startTone(ToneGenerator.TONE_CDMA_ALERT_NETWORK_LITE, 600)
-                } catch (e: Exception) {
-                    playSystemNotificationSound()
-                }
-            } else {
-                playSystemNotificationSound()
+            stopAlertSound()
+            val mp = MediaPlayer()
+            val afd = context.resources.openRawResourceFd(R.raw.order_alert_sound)
+            mp.setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
+            afd.close()
+            mp.setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_ALARM)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build()
+            )
+            mp.isLooping = false
+            mp.setOnCompletionListener {
+                it.release()
+                if (activeMediaPlayer == it) activeMediaPlayer = null
             }
+            mp.prepare()
+            mp.start()
+            activeMediaPlayer = mp
 
-            // 2. Vibrate pattern: 200ms on, 100ms off, 200ms on
             if (vibrate) {
                 triggerVibration()
             }
         } catch (e: Exception) {
-            Log.e("SoundAlertManager", "Error playing sound alert", e)
+            Log.e("SoundAlertManager", "Error playing 10s sound alert, falling back to tone", e)
+            playFallbackTone(vibrate)
         }
+    }
+
+    private fun playFallbackTone(vibrate: Boolean) {
+        try {
+            if (toneGenerator != null) {
+                toneGenerator?.startTone(ToneGenerator.TONE_CDMA_ALERT_NETWORK_LITE, 600)
+            } else {
+                playSystemNotificationSound()
+            }
+            if (vibrate) triggerVibration()
+        } catch (e: Exception) {
+            Log.e("SoundAlertManager", "Fallback tone failed", e)
+        }
+    }
+
+    /**
+     * Stop active ringing alert immediately.
+     */
+    fun stopAlertSound() {
+        try {
+            activeMediaPlayer?.let {
+                if (it.isPlaying) it.stop()
+                it.release()
+            }
+        } catch (e: Exception) {
+            // Ignore
+        }
+        activeMediaPlayer = null
     }
 
     /**
@@ -104,6 +144,7 @@ class SoundAlertManager(private val context: Context) {
      * Stop repeating alert when vendor accepts/rejects order or views order list.
      */
     fun stopRepeatingAlert() {
+        stopAlertSound()
         repeatingAlertJob?.cancel()
         repeatingAlertJob = null
         alertRepeatCount = 0

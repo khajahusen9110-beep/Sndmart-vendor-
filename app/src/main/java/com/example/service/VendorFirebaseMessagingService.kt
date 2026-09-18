@@ -1,10 +1,19 @@
 package com.example.service
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.Context
+import android.content.Intent
+import android.media.AudioAttributes
+import android.media.MediaPlayer
 import android.util.Log
+import androidx.core.app.NotificationCompat
+import com.example.MainActivity
+import com.example.R
 import com.example.data.local.SessionManager
 import com.example.data.network.SupabaseClient
 import com.example.data.repository.VendorRepository
-import com.example.util.NotificationHelper
 import com.example.util.OrderEventBus
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
@@ -42,39 +51,75 @@ class VendorFirebaseMessagingService : FirebaseMessagingService() {
         }
     }
 
-    override fun onMessageReceived(remoteMessage: RemoteMessage) {
-        super.onMessageReceived(remoteMessage)
-        Log.d("VendorFCMService", "FCM Message received from: ${remoteMessage.from}, data: ${remoteMessage.data}")
+    override fun onMessageReceived(message: RemoteMessage) {
+        super.onMessageReceived(message)
+        Log.d("VendorFCMService", "FCM Message received from: ${message.from}, data: ${message.data}")
 
-        val data = remoteMessage.data
-
-        // Extract parameters from payload data map or notification fallback
-        val orderId = data["order_id"] ?: data["orderId"] ?: data["id"] ?: "order_${System.currentTimeMillis().toString().takeLast(6)}"
-        val orderNumber = data["order_number"] ?: data["orderNumber"] ?: orderId.takeLast(6).uppercase()
-        val title = data["title"] ?: data["customer_name"] ?: data["customerName"] ?: data["user_name"] ?: remoteMessage.notification?.title ?: "New Order"
-        val body = data["body"] ?: data["message"] ?: data["items_summary"] ?: data["itemsSummary"] ?: remoteMessage.notification?.body ?: "You have a new order"
-        val customerName = data["customer_name"] ?: data["customerName"] ?: data["user_name"] ?: title
-        val customerPhone = data["customer_phone"] ?: data["customerPhone"] ?: data["phone"]
-        val itemsCount = data["items_count"]?.toIntOrNull() ?: data["itemsCount"]?.toIntOrNull() ?: 1
-        val totalAmount = data["total_amount"]?.toDoubleOrNull() ?: data["totalAmount"]?.toDoubleOrNull() ?: data["amount"]?.toDoubleOrNull() ?: 0.0
-        val deliveryAddress = data["delivery_address"] ?: data["deliveryAddress"] ?: data["address"]
-        val itemsSummary = data["items_summary"] ?: data["itemsSummary"] ?: data["items"] ?: body
+        val orderId = message.data["orderId"] ?: message.data["order_id"] ?: message.data["id"] ?: "order_${System.currentTimeMillis()}"
+        val title = message.data["title"] ?: message.notification?.title ?: "New Order"
+        val body = message.data["message"] ?: message.data["body"] ?: message.notification?.body ?: "You have a new order"
 
         // Notify active screens (like OrdersScreen) to immediately reload data
         OrderEventBus.notifyNewOrder(orderId)
 
-        // Post high-priority incoming order alert notification with setFullScreenIntent
-        NotificationHelper.showIncomingOrderAlert(
-            context = applicationContext,
-            orderId = orderId,
-            orderNumber = orderNumber,
-            customerName = customerName,
-            customerPhone = customerPhone,
-            itemsCount = itemsCount,
-            totalAmount = totalAmount,
-            deliveryAddress = deliveryAddress,
-            itemsSummary = itemsSummary
+        val intent = Intent(this, MainActivity::class.java).apply {
+            putExtra("order_id", orderId)
+            putExtra("NAVIGATE_TO", "orders")
+            putExtra("SELECTED_ORDER_ID", orderId)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            this, orderId.hashCode(), intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
+
+        val channelId = "new_order_alerts_v2"
+        val channel = NotificationChannel(
+            channelId, "New Order Alerts", NotificationManager.IMPORTANCE_HIGH
+        ).apply {
+            enableVibration(true)
+            vibrationPattern = longArrayOf(0, 500, 200, 500, 200, 500, 200, 1000)
+            setSound(null, null) // Silent channel so custom 10s MediaPlayer sound plays without overlap
+        }
+        val notificationManager = getSystemService(NotificationManager::class.java)
+        notificationManager.createNotificationChannel(channel)
+
+        val notification = NotificationCompat.Builder(this, channelId)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .setSound(null)
+            .build()
+
+        notificationManager.notify(orderId.hashCode(), notification)
+
+        // Play 10-second continuous urgent alert sound using MediaPlayer
+        playLongAlertSound(this)
+    }
+
+    private fun playLongAlertSound(context: Context) {
+        try {
+            val mediaPlayer = MediaPlayer()
+            val afd = context.resources.openRawResourceFd(R.raw.order_alert_sound)
+            mediaPlayer.setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
+            afd.close()
+            mediaPlayer.setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_ALARM)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build()
+            )
+            mediaPlayer.isLooping = false
+            mediaPlayer.setOnCompletionListener { it.release() }
+            mediaPlayer.prepare()
+            mediaPlayer.start()
+        } catch (e: Exception) {
+            Log.e("VendorFcm", "Failed to play alert sound", e)
+        }
     }
 }
 

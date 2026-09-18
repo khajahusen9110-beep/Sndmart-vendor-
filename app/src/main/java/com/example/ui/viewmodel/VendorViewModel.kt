@@ -1599,7 +1599,7 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
         soundAlertManager.playNewOrderSound(vibrate = true)
     }
 
-    fun simulateIncomingFullScreenOrderAlert() {
+    fun simulateNewOrderAlert() {
         val sampleOrderId = "ord_${System.currentTimeMillis().toString().takeLast(6)}"
         val sampleOrderNumber = (1000..9999).random().toString()
         val customerNames = listOf("Rahul Sharma", "Priya Patel", "Amit Verma", "Sneha Reddy", "Vikram Singh")
@@ -1612,18 +1612,21 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
             "Veg Fried Rice x1, Chilli Paneer x1, Spring Rolls x1"
         ).random()
 
-        NotificationHelper.showIncomingOrderAlert(
+        NotificationHelper.showNewOrderNotification(
             context = getApplication(),
             orderId = sampleOrderId,
-            orderNumber = sampleOrderNumber,
-            customerName = sampleCustomer,
-            customerPhone = "+91 98765 43210",
-            itemsCount = 3,
-            totalAmount = sampleAmount,
-            deliveryAddress = "Flat 402, Green Valley Apts, MG Road",
-            itemsSummary = sampleItems
+            title = "🛎️ New Order #$sampleOrderNumber (₹${"%.2f".format(sampleAmount)})",
+            body = "$sampleCustomer • $sampleItems"
         )
+        _inAppOrderAlert.value = "🛎️ New Order - Please Prepare! #$sampleOrderNumber"
+        if (sessionManager.isSoundAlertEnabled) {
+            soundAlertManager.playNewOrderSound(vibrate = true)
+        }
+        val vId = currentVendorId()
+        if (vId != null) loadOrders(vId)
     }
+
+    fun simulateIncomingFullScreenOrderAlert() = simulateNewOrderAlert()
 
     fun clearInAppAlert() {
         _inAppOrderAlert.value = null
@@ -1631,16 +1634,6 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun clearOrderAlert() = clearInAppAlert()
-
-    fun simulateNewOrderAlert() {
-        simulateIncomingFullScreenOrderAlert()
-        _inAppOrderAlert.value = "🛎️ New Order - Please Prepare! #ORD-${(1000..9999).random()}"
-        if (sessionManager.isSoundAlertEnabled) {
-            soundAlertManager.playNewOrderSound(vibrate = true)
-        }
-        val vId = currentVendorId()
-        if (vId != null) loadOrders(vId)
-    }
 
     fun simulateNewOrderNotification() = simulateNewOrderAlert()
 

@@ -40,14 +40,6 @@
             </intent-filter>
         </activity>
 
-        <activity
-            android:name=".ui.orders.IncomingOrderActivity"
-            android:exported="false"
-            android:showWhenLocked="true"
-            android:turnScreenOn="true"
-            android:launchMode="singleTask"
-            android:excludeFromRecents="true"
-            android:theme="@style/Theme.MyApplication" />
 
         <!-- Disable automatic FCM auto-init and background sync to prevent hard failure exceptions in emulators or environments without Play Services -->
         <meta-data

@@ -1,52 +1,35 @@
 package com.example.util
 
-import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.media.AudioAttributes
-import android.media.RingtoneManager
-import android.net.Uri
+import android.media.MediaPlayer
 import android.os.Build
-import android.provider.Settings
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.example.MainActivity
 import com.example.R
-import com.example.ui.orders.IncomingOrderActivity
 
 object NotificationHelper {
 
-    const val CHANNEL_ID_INCOMING_ORDERS = "sndmart_incoming_orders_v2"
-    const val CHANNEL_NAME_INCOMING_ORDERS = "Incoming Food Orders"
-    const val CHANNEL_DESC_INCOMING_ORDERS = "Urgent full-screen alerts for new customer food orders"
-    const val NOTIFICATION_ID_INCOMING_ORDER = 1001
+    const val CHANNEL_ID_NEW_ORDERS = "new_order_alerts_v2"
+    const val CHANNEL_NAME_NEW_ORDERS = "New Order Alerts"
 
     fun createNotificationChannels(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
-                ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
-
-            val audioAttributes = AudioAttributes.Builder()
-                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                .setUsage(AudioAttributes.USAGE_ALARM)
-                .build()
-
             val channel = NotificationChannel(
-                CHANNEL_ID_INCOMING_ORDERS,
-                CHANNEL_NAME_INCOMING_ORDERS,
+                CHANNEL_ID_NEW_ORDERS,
+                CHANNEL_NAME_NEW_ORDERS,
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
-                description = CHANNEL_DESC_INCOMING_ORDERS
+                description = "Alert notifications for new customer orders"
                 enableVibration(true)
-                vibrationPattern = longArrayOf(0, 500, 200, 500, 200, 1000)
-                setSound(soundUri, audioAttributes)
-                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
-                setShowBadge(true)
-                setBypassDnd(true)
+                vibrationPattern = longArrayOf(0, 500, 200, 500, 200, 500, 200, 1000)
+                setSound(null, null) // Silent channel so custom 10s MediaPlayer sound plays without overlap
             }
 
             val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
@@ -54,147 +37,69 @@ object NotificationHelper {
         }
     }
 
-    fun showIncomingOrderAlert(
+    fun playLongAlertSound(context: Context) {
+        try {
+            val mediaPlayer = MediaPlayer()
+            val afd = context.resources.openRawResourceFd(R.raw.order_alert_sound)
+            mediaPlayer.setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
+            afd.close()
+            mediaPlayer.setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_ALARM)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build()
+            )
+            mediaPlayer.isLooping = false
+            mediaPlayer.setOnCompletionListener { it.release() }
+            mediaPlayer.prepare()
+            mediaPlayer.start()
+        } catch (e: Exception) {
+            Log.e("NotificationHelper", "Failed to play alert sound", e)
+        }
+    }
+
+    fun showNewOrderNotification(
         context: Context,
         orderId: String,
-        orderNumber: String,
-        customerName: String,
-        customerPhone: String? = null,
-        itemsCount: Int = 1,
-        totalAmount: Double = 0.0,
-        deliveryAddress: String? = null,
-        itemsSummary: String? = null
+        title: String = "New Order",
+        body: String = "You have a new order",
+        playSound: Boolean = true
     ) {
         createNotificationChannels(context)
 
-        // 1. Full-screen Intent directly to IncomingOrderActivity
-        val fullScreenIntent = Intent(context, IncomingOrderActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or
-                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                    Intent.FLAG_ACTIVITY_SINGLE_TOP
-            putExtra(IncomingOrderActivity.EXTRA_ORDER_ID, orderId)
-            putExtra(IncomingOrderActivity.EXTRA_ORDER_NUMBER, orderNumber)
-            putExtra(IncomingOrderActivity.EXTRA_CUSTOMER_NAME, customerName)
-            putExtra(IncomingOrderActivity.EXTRA_CUSTOMER_PHONE, customerPhone)
-            putExtra(IncomingOrderActivity.EXTRA_ITEMS_COUNT, itemsCount)
-            putExtra(IncomingOrderActivity.EXTRA_TOTAL_AMOUNT, totalAmount)
-            putExtra(IncomingOrderActivity.EXTRA_DELIVERY_ADDRESS, deliveryAddress)
-            putExtra(IncomingOrderActivity.EXTRA_ITEMS_SUMMARY, itemsSummary)
+        val intent = Intent(context, MainActivity::class.java).apply {
             putExtra("order_id", orderId)
-            putExtra("orderId", orderId)
-            putExtra("title", customerName)
-            putExtra("body", itemsSummary ?: "New Order")
-        }
-
-        val fullScreenPendingIntent = PendingIntent.getActivity(
-            context,
-            orderId.hashCode(),
-            fullScreenIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        // 2. Content Intent for tap
-        val contentIntent = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             putExtra("NAVIGATE_TO", "orders")
             putExtra("SELECTED_ORDER_ID", orderId)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
-        val contentPendingIntent = PendingIntent.getActivity(
+        val pendingIntent = PendingIntent.getActivity(
             context,
-            orderId.hashCode() + 1,
-            contentIntent,
+            orderId.hashCode(),
+            intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val soundUri: Uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
-            ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
-
-        val formattedAmount = "₹${String.format(java.util.Locale.US, "%.2f", totalAmount)}"
-        val titleText = "🛎️ NEW ORDER TO PREPARE #$orderNumber • $formattedAmount"
-        val bodyText = "$customerName • $itemsCount item(s) • Tap to start preparing"
-
-        val builder = NotificationCompat.Builder(context, CHANNEL_ID_INCOMING_ORDERS)
-            .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle(titleText)
-            .setContentText(bodyText)
-            .setStyle(
-                NotificationCompat.BigTextStyle()
-                    .bigText("$bodyText\nAddress: ${deliveryAddress ?: "Takeaway / Dine-in"}\nItems: ${itemsSummary ?: "$itemsCount items"}")
-            )
-            .setPriority(NotificationCompat.PRIORITY_MAX)
-            .setCategory(NotificationCompat.CATEGORY_CALL)
-            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setSound(soundUri)
-            .setVibrate(longArrayOf(0, 500, 200, 500, 200, 1000))
-            .setFullScreenIntent(fullScreenPendingIntent, true)
-            .setContentIntent(contentPendingIntent)
+        val builder = NotificationCompat.Builder(context, CHANNEL_ID_NEW_ORDERS)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setContentIntent(pendingIntent)
             .setAutoCancel(true)
-            .setOngoing(true)
-
-        // Permission check before dispatching notification
-        val overlayAllowed = hasOverlayPermission(context)
-        val fullScreenAllowed = hasFullScreenIntentPermission(context)
-        val notificationsAllowed = NotificationManagerCompat.from(context).areNotificationsEnabled()
-
-        Log.d(
-            "NotificationHelper",
-            "Dispatching incoming order notification: overlayAllowed=$overlayAllowed, " +
-                "fullScreenAllowed=$fullScreenAllowed, notificationsAllowed=$notificationsAllowed"
-        )
+            .setSound(null)
 
         try {
             val notificationManager = NotificationManagerCompat.from(context)
-            notificationManager.notify(NOTIFICATION_ID_INCOMING_ORDER, builder.build())
+            notificationManager.notify(orderId.hashCode(), builder.build())
+            if (playSound) {
+                playLongAlertSound(context)
+            }
         } catch (e: SecurityException) {
             Log.w("NotificationHelper", "Missing POST_NOTIFICATIONS permission: ${e.message}")
         } catch (e: Exception) {
-            Log.e("NotificationHelper", "Failed to post incoming order notification", e)
-        }
-
-        // Android only auto-launches setFullScreenIntent when the screen is OFF/locked.
-        // If the screen is already on (vendor actively using the phone), the OS silently
-        // downgrades it to a plain heads-up notification instead. To guarantee the
-        // full-screen order alert pops up immediately in that case too, launch the
-        // activity directly here. This background-start is allowed because the app holds
-        // the "Display over other apps" (SYSTEM_ALERT_WINDOW) permission.
-        if (overlayAllowed) {
-            try {
-                context.startActivity(fullScreenIntent)
-            } catch (e: Exception) {
-                Log.e("NotificationHelper", "Failed to directly launch full-screen order alert", e)
-            }
-        }
-    }
-
-    /**
-     * Checks if the app has the 'Display over other apps' (SYSTEM_ALERT_WINDOW) permission.
-     */
-    fun hasOverlayPermission(context: Context): Boolean {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            Settings.canDrawOverlays(context)
-        } else {
-            true
-        }
-    }
-
-    /**
-     * Checks if the app has the USE_FULL_SCREEN_INTENT permission on Android 14+ (API 34+).
-     */
-    fun hasFullScreenIntentPermission(context: Context): Boolean {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
-            nm?.canUseFullScreenIntent() ?: true
-        } else {
-            true
-        }
-    }
-
-    fun dismissIncomingOrderAlert(context: Context) {
-        try {
-            val notificationManager = NotificationManagerCompat.from(context)
-            notificationManager.cancel(NOTIFICATION_ID_INCOMING_ORDER)
-        } catch (e: Exception) {
-            // Ignore
+            Log.e("NotificationHelper", "Failed to post order notification", e)
         }
     }
 }

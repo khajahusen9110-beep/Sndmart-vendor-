@@ -432,20 +432,33 @@ fun OrdersScreen(
                                         }
                                     }
                                     "preparing" -> {
-                                        Button(
-                                            onClick = {
-                                                onUpdateOrderStatus(order.id, "ready", null, null) { _, _ -> }
-                                            },
-                                            colors = ButtonDefaults.buttonColors(containerColor = PolishEmeraldDark),
+                                        Surface(
+                                            color = SpruceContainer,
                                             shape = RoundedCornerShape(12.dp),
                                             modifier = Modifier.fillMaxWidth()
                                         ) {
-                                            Icon(imageVector = Icons.Default.DoneAll, contentDescription = null, modifier = Modifier.size(16.dp))
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            Text("Mark Ready", fontWeight = FontWeight.Bold)
+                                            Row(
+                                                modifier = Modifier.padding(10.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.Center
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.DeliveryDining,
+                                                    contentDescription = null,
+                                                    tint = SprucePrimary,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Text(
+                                                    text = "Assigning delivery partner...",
+                                                    fontSize = 12.sp,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    color = SpruceOnContainer
+                                                )
+                                            }
                                         }
                                     }
-                                    "ready" -> {
+                                    "ready", "out_for_delivery" -> {
                                         Surface(
                                             color = PolishPurpleLight,
                                             shape = RoundedCornerShape(12.dp),
@@ -464,7 +477,7 @@ fun OrdersScreen(
                                                 )
                                                 Spacer(modifier = Modifier.width(6.dp))
                                                 Text(
-                                                    text = "Waiting for delivery partner pickup & delivery",
+                                                    text = if (order.status?.lowercase() == "out_for_delivery") "Out for delivery" else "Delivery partner assigned",
                                                     fontSize = 12.sp,
                                                     fontWeight = FontWeight.Medium,
                                                     color = PolishPurple
