@@ -1,8 +1,10 @@
 package com.example.ui.components
 
+import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -26,6 +28,7 @@ import com.example.ui.theme.*
 /**
  * Blocking full-screen overlay presented when the client app version is below
  * the minimum supported version or when a force-update flag is enabled.
+ * Back press closes the application without bypassing the update requirement.
  */
 @Composable
 fun BlockingUpdateScreen(
@@ -34,9 +37,15 @@ fun BlockingUpdateScreen(
     minimumVersion: String?,
     updateUrl: String?,
     onCheckAgain: () -> Unit,
+    onUpdateNow: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val activity = context as? Activity
+    BackHandler(enabled = true) {
+        activity?.finishAffinity() ?: activity?.finish()
+    }
+
     val message = updateMessage?.ifBlank { null }
         ?: "A critical update is required to continue using Sndmart Vendor. Please update to the latest version to ensure order security and compatibility."
 
@@ -163,7 +172,11 @@ fun BlockingUpdateScreen(
 
             Button(
                 onClick = {
-                    openUpdateDestination(context, updateUrl)
+                    if (onUpdateNow != null) {
+                        onUpdateNow()
+                    } else {
+                        openUpdateDestination(context, updateUrl)
+                    }
                 },
                 modifier = Modifier
                     .fillMaxWidth()
@@ -212,7 +225,7 @@ fun BlockingUpdateScreen(
     }
 }
 
-private fun openUpdateDestination(context: Context, updateUrl: String?) {
+fun openUpdateDestination(context: Context, updateUrl: String?) {
     try {
         if (!updateUrl.isNullOrBlank()) {
             val intent = Intent(Intent.ACTION_VIEW, Uri.parse(updateUrl)).apply {

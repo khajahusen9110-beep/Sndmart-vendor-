@@ -712,7 +712,26 @@ class VendorRepository(
         }
     }
 
-    // Earnings & Wallet (Rule 1: Paginated 20 at a time)
+    // Earnings & Wallet
+    suspend fun getVendorWallet(): Resource<VendorWalletResponse> = withContext(Dispatchers.IO) {
+        try {
+            val response = api.getMyVendorWallet()
+            if (response.isSuccessful) {
+                val body = response.body()
+                if (body != null) {
+                    Resource.Success(body)
+                } else {
+                    Resource.Error("Empty wallet response", response.code())
+                }
+            } else {
+                Resource.Error(extractErrorMessage(response, "Failed to load wallet balance"), response.code())
+            }
+        } catch (e: Exception) {
+            Resource.Error(e.localizedMessage ?: "Error loading wallet balance")
+        }
+    }
+
+    // Wallet Transactions (Rule 1: Paginated 20 at a time)
     suspend fun getWalletTransactions(vendorId: String, limit: Int = 20, offset: Int = 0): Resource<List<WalletTransaction>> = withContext(Dispatchers.IO) {
         try {
             val response = api.getWalletTransactions(vendorIdFilter = "eq.$vendorId", limit = limit, offset = offset)
@@ -752,26 +771,54 @@ class VendorRepository(
         }
     }
 
-    suspend fun requestWithdrawal(
+    // Orders placed today filtered on server using IST range converted to UTC
+    suspend fun getTodayOrders(
         vendorId: String,
-        cityId: String?,
+        startUtcIso: String,
+        endUtcIso: String
+    ): Resource<List<Order>> = withContext(Dispatchers.IO) {
+        try {
+            val response = api.getTodayOrders(
+                vendorIdFilter = "eq.$vendorId",
+                createdAtGte = "gte.$startUtcIso",
+                createdAtLt = "lt.$endUtcIso"
+            )
+            if (response.isSuccessful) {
+                Resource.Success(response.body() ?: emptyList())
+            } else {
+                Resource.Error(extractErrorMessage(response, "Failed to load today's orders"), response.code())
+            }
+        } catch (e: Exception) {
+            Resource.Error(e.localizedMessage ?: "Error loading today's orders")
+        }
+    }
+
+    suspend fun requestWithdrawal(
         amount: Double,
-        note: String?
+        requestId: String? = null
     ): Resource<Withdrawal> = withContext(Dispatchers.IO) {
         try {
-            val body = mutableMapOf<String, Any?>(
-                "vendor_id" to vendorId,
-                "amount" to amount,
-                "status" to "pending"
+            val body = mutableMapOf<String, Any>(
+                "p_amount" to amount
             )
-            if (!cityId.isNullOrEmpty()) body["city_id"] = cityId
-            if (!note.isNullOrEmpty()) body["note"] = note.trim()
-
-            val response = api.requestWithdrawal(body)
+            if (!requestId.isNullOrBlank()) {
+                body["p_request_id"] = requestId
+            }
+            var response = api.vendorRequestWithdrawal(body)
+            // If DB RPC signature does not accept p_request_id, retry with just p_amount
+            if (!response.isSuccessful && !requestId.isNullOrBlank()) {
+                val errorBodyStr = try { response.errorBody()?.string() } catch (_: Exception) { null }
+                if (errorBodyStr?.contains("p_request_id") == true || errorBodyStr?.contains("PGRST202") == true || response.code() == 404) {
+                    response = api.vendorRequestWithdrawal(mapOf("p_amount" to amount))
+                }
+            }
             if (response.isSuccessful) {
-                val created = response.body()?.firstOrNull()
-                if (created != null) Resource.Success(created)
-                else Resource.Success(Withdrawal(vendorId = vendorId, amount = amount, status = "pending", note = note))
+                val created = response.body()
+                if (created != null) {
+                    Resource.Success(created)
+                } else {
+                    Resource.Success(Withdrawal(amount = amount, status = "pending", requestId = requestId))
+                }
             } else {
                 val errMsg = extractErrorMessage(response, "")
                 Resource.Error(errMsg.ifBlank { "Failed to submit withdrawal request" }, response.code())
@@ -780,6 +827,14 @@ class VendorRepository(
             Resource.Error(e.localizedMessage ?: "Error submitting withdrawal request")
         }
     }
+
+    suspend fun requestWithdrawal(
+        vendorId: String,
+        cityId: String?,
+        amount: Double,
+        note: String? = null,
+        requestId: String? = null
+    ): Resource<Withdrawal> = requestWithdrawal(amount, requestId)
 
     // Reviews (Rule 1: Paginated 20 at a time)
     suspend fun getReviews(vendorId: String, limit: Int = 20, offset: Int = 0): Resource<List<Review>> = withContext(Dispatchers.IO) {
@@ -978,27 +1033,52 @@ class VendorRepository(
                 "is_active" to true,
                 "firebase_project" to "native_vendor"
             )
-            val response = api.registerFcmToken(onConflict = "vendor_id", token = body)
+            var response = api.registerFcmToken(onConflict = "vendor_id", token = body)
+            if (!response.isSuccessful) {
+                val errBody = try { response.errorBody()?.string() } catch (_: Exception) { null }
+                android.util.Log.w("VendorRepository", "FCM registration failed (code=${response.code()}, body=$errBody). Refreshing session to retry...")
+                // Retry once after refreshing session
+                val refreshRes = validateOrRefreshSession()
+                if (refreshRes is Resource.Success) {
+                    response = api.registerFcmToken(onConflict = "vendor_id", token = body)
+                }
+            }
+
             if (response.isSuccessful) {
-                android.util.Log.d("VendorRepository", "FCM token successfully upserted for vendor_id=$vendorId")
+                android.util.Log.d("VendorRepository", "FCM token successfully registered for vendor_id=$vendorId")
                 Resource.Success(Unit)
             } else {
-                val errBody = response.errorBody()?.string()
-                android.util.Log.e("VendorRepository", "FCM registration error: ${errBody ?: response.message()}")
-                Resource.Error("FCM registration error: ${errBody ?: response.message()}", response.code())
+                val errBody = try { response.errorBody()?.string() } catch (_: Exception) { null }
+                android.util.Log.e("VendorRepository", "FCM registration error (code=${response.code()}): $errBody")
+                Resource.Error("FCM registration error (code=${response.code()}): $errBody", response.code())
             }
         } catch (e: Exception) {
-            android.util.Log.e("VendorRepository", "Error upserting FCM token", e)
+            android.util.Log.e("VendorRepository", "Exception registering FCM token", e)
             Resource.Error(e.localizedMessage ?: "Error registering FCM token")
         }
     }
 
-    suspend fun deactivateFcmToken(vendorId: String, token: String): Resource<Unit> = withContext(Dispatchers.IO) {
+    suspend fun deactivateFcmToken(vendorId: String, token: String? = null): Resource<Unit> = withContext(Dispatchers.IO) {
         try {
-            api.updateFcmToken("eq.$vendorId", "eq.$token", mapOf("is_active" to false))
+            api.deactivateVendorFcmTokens("eq.$vendorId", mapOf("is_active" to false))
             Resource.Success(Unit)
         } catch (e: Exception) {
             Resource.Error(e.localizedMessage ?: "Error deactivating FCM token")
+        }
+    }
+
+    suspend fun sendTestAlert(): Resource<TestAlertResponse> = withContext(Dispatchers.IO) {
+        try {
+            val response = api.vendorSendTestAlert()
+            if (response.isSuccessful) {
+                val body = response.body() ?: TestAlertResponse(sent = false, reason = "Empty response")
+                Resource.Success(body)
+            } else {
+                val err = extractErrorMessage(response, "Failed to send test alert")
+                Resource.Error(err, response.code())
+            }
+        } catch (e: Exception) {
+            Resource.Error(e.localizedMessage ?: "Failed to send test alert")
         }
     }
 

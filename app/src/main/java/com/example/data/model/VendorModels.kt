@@ -282,15 +282,53 @@ data class OrderStatusHistory(
     @Json(name = "created_at") val createdAt: String? = null
 )
 
+enum class WalletTransactionKind {
+    CREDIT,   // Credit, order_credit: green "+₹...", positive inflow
+    DEBIT,    // Debit, withdrawal, penalty: red "-₹...", deduction
+    NEUTRAL   // Unknown, refund, adjustment: neutral styling, not silently credit
+}
+
 @JsonClass(generateAdapter = true)
 data class WalletTransaction(
     val id: String = "",
     @Json(name = "vendor_id") val vendorId: String = "",
     @Json(name = "order_id") val orderId: String? = null,
-    val type: String = "credit", // 'credit', 'debit'
+    val type: String = "credit", // 'credit', 'debit', 'order_credit', 'withdrawal', 'penalty', 'adjustment', 'refund'
     val amount: Double = 0.0,
     val description: String? = null,
     @Json(name = "created_at") val createdAt: String? = null
+) {
+    val kind: WalletTransactionKind
+        get() {
+            val normType = type.trim().lowercase()
+            return when {
+                normType in listOf("credit", "order_credit") -> WalletTransactionKind.CREDIT
+                normType in listOf("debit", "withdrawal") -> WalletTransactionKind.DEBIT
+                amount < 0.0 -> WalletTransactionKind.DEBIT
+                normType in listOf("penalty") -> WalletTransactionKind.DEBIT
+                normType in listOf("refund", "adjustment") -> {
+                    if (amount < 0.0) WalletTransactionKind.DEBIT else WalletTransactionKind.NEUTRAL
+                }
+                normType.contains("debit") -> WalletTransactionKind.DEBIT
+                else -> WalletTransactionKind.NEUTRAL
+            }
+        }
+
+    val isCredit: Boolean
+        get() = kind == WalletTransactionKind.CREDIT
+
+    val isDebit: Boolean
+        get() = kind == WalletTransactionKind.DEBIT
+
+    val isNeutral: Boolean
+        get() = kind == WalletTransactionKind.NEUTRAL
+}
+
+@JsonClass(generateAdapter = true)
+data class VendorWalletResponse(
+    @Json(name = "vendor_id") val vendorId: String? = null,
+    val balance: Double = 0.0,
+    val transactions: List<WalletTransaction>? = null
 )
 
 @JsonClass(generateAdapter = true)
@@ -313,8 +351,10 @@ data class Withdrawal(
     val amount: Double = 0.0,
     val status: String = "pending", // 'pending', 'approved', 'paid', 'rejected'
     val note: String? = null,
+    @Json(name = "rejection_reason") val rejectionReason: String? = null,
     @Json(name = "commission_amount") val commissionAmount: Double? = null,
     @Json(name = "net_payable_amount") val netPayableAmount: Double? = null,
+    @Json(name = "request_id") val requestId: String? = null,
     @Json(name = "paid_at") val paidAt: String? = null,
     @Json(name = "created_at") val createdAt: String? = null,
     @Json(name = "updated_at") val updatedAt: String? = null
@@ -376,6 +416,8 @@ data class FcmTokenRegistration(
 data class AppVersionInfo(
     val id: String? = null,
     val platform: String? = null,
+    @Json(name = "min_version_code") val minVersionCode: Int? = null,
+    @Json(name = "latest_version_code") val latestVersionCode: Int? = null,
     @Json(name = "minimum_supported_version") val minimumSupportedVersion: String? = null,
     @Json(name = "current_version") val currentVersion: String? = null,
     @Json(name = "force_update") val forceUpdate: Boolean = false,
@@ -397,4 +439,11 @@ data class AppSettingItem(
     val maintenanceMessage: String?
         get() = value?.get("message")?.toString()
 }
+
+@JsonClass(generateAdapter = true)
+data class TestAlertResponse(
+    val sent: Boolean = false,
+    val reason: String? = null
+)
+
 

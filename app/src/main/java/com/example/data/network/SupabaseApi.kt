@@ -133,9 +133,19 @@ interface SupabaseApi {
         @Query("vendor_id") vendorIdFilter: String,
         @Query("status") statusFilter: String = "in.(confirmed,preparing,ready,out_for_delivery,delivered,cancelled,rejected)",
         @Query("select") select: String = "id,order_number,status,subtotal,discount_amount,delivery_fee,handling_fee,total_amount,commission_amount,vendor_amount,notes,payment_status,payment_method,created_at,customer_id,address_id,order_items(id,product_name,quantity,unit_price,total_price),address:customer_addresses!orders_address_id_fkey(address_line,landmark,recipient_name,phone)",
-        @Query("order") order: String = "created_at.desc",
+        @Query("order") order: String = "created_at.desc,id.desc",
         @Query("limit") limit: Int? = 20,
         @Query("offset") offset: Int? = 0
+    ): Response<List<Order>>
+
+    @GET("rest/v1/orders")
+    suspend fun getTodayOrders(
+        @Query("vendor_id") vendorIdFilter: String,
+        @Query("created_at") createdAtGte: String,
+        @Query("created_at") createdAtLt: String,
+        @Query("select") select: String = "id,order_number,status,subtotal,discount_amount,delivery_fee,handling_fee,total_amount,commission_amount,vendor_amount,notes,payment_status,payment_method,created_at",
+        @Query("order") order: String = "created_at.desc,id.desc",
+        @Query("limit") limit: Int? = 1000
     ): Response<List<Order>>
 
     @GET("rest/v1/orders")
@@ -166,11 +176,16 @@ interface SupabaseApi {
     ): Response<List<OrderStatusHistory>>
 
     // 7. Wallet Transactions
+    @POST("rest/v1/rpc/get_my_vendor_wallet")
+    suspend fun getMyVendorWallet(
+        @Body body: Map<String, @JvmSuppressWildcards Any?> = emptyMap()
+    ): Response<VendorWalletResponse>
+
     @GET("rest/v1/vendor_wallet_transactions")
     suspend fun getWalletTransactions(
         @Query("vendor_id") vendorIdFilter: String,
         @Query("select") select: String = "id,vendor_id,order_id,type,amount,description,created_at",
-        @Query("order") order: String = "created_at.desc",
+        @Query("order") order: String = "created_at.desc,id.desc",
         @Query("limit") limit: Int? = 20,
         @Query("offset") offset: Int? = 0
     ): Response<List<WalletTransaction>>
@@ -180,7 +195,7 @@ interface SupabaseApi {
     suspend fun getPayouts(
         @Query("vendor_id") vendorIdFilter: String,
         @Query("select") select: String = "id,vendor_id,order_id,gross_amount,commission_amount,net_amount,status,paid_at,created_at",
-        @Query("order") order: String = "created_at.desc",
+        @Query("order") order: String = "created_at.desc,id.desc",
         @Query("limit") limit: Int? = 20,
         @Query("offset") offset: Int? = 0
     ): Response<List<Payout>>
@@ -190,16 +205,15 @@ interface SupabaseApi {
     suspend fun getWithdrawals(
         @Query("vendor_id") vendorIdFilter: String,
         @Query("select") select: String = "id,vendor_id,city_id,amount,status,note,commission_amount,net_payable_amount,paid_at,created_at",
-        @Query("order") order: String = "created_at.desc",
+        @Query("order") order: String = "created_at.desc,id.desc",
         @Query("limit") limit: Int? = 20,
         @Query("offset") offset: Int? = 0
     ): Response<List<Withdrawal>>
 
-    @POST("rest/v1/vendor_withdrawals")
-    @Headers("Prefer: return=representation")
-    suspend fun requestWithdrawal(
-        @Body withdrawal: Map<String, @JvmSuppressWildcards Any?>
-    ): Response<List<Withdrawal>>
+    @POST("rest/v1/rpc/vendor_request_withdrawal")
+    suspend fun vendorRequestWithdrawal(
+        @Body body: Map<String, @JvmSuppressWildcards Any>
+    ): Response<Withdrawal>
 
     // 10. Reviews
     @GET("rest/v1/vendor_reviews")
@@ -258,6 +272,17 @@ interface SupabaseApi {
         @Query("fcm_token") fcmTokenFilter: String,
         @Body updates: Map<String, @JvmSuppressWildcards Any?>
     ): Response<List<FcmTokenRegistration>>
+
+    @PATCH("rest/v1/vendor_fcm_tokens")
+    suspend fun deactivateVendorFcmTokens(
+        @Query("vendor_id") vendorIdFilter: String,
+        @Body updates: Map<String, @JvmSuppressWildcards Any?>
+    ): Response<Unit>
+
+    @POST("rest/v1/rpc/vendor_send_test_alert")
+    suspend fun vendorSendTestAlert(
+        @Body body: Map<String, @JvmSuppressWildcards Any?> = emptyMap()
+    ): Response<TestAlertResponse>
 
     // 13. Supabase Storage
     @POST("storage/v1/object/{bucket}/{path}")

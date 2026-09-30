@@ -2,6 +2,7 @@ package com.example.ui.earnings
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -25,12 +26,15 @@ import androidx.compose.ui.unit.sp
 import android.widget.Toast
 import com.example.data.model.Payout
 import com.example.data.model.WalletTransaction
+import com.example.data.model.WalletTransactionKind
 import com.example.data.model.Withdrawal
 import com.example.ui.components.ConfirmationDialog
 import com.example.ui.components.StatusBadge
 import com.example.ui.components.TransactionCardSkeleton
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.EarningsUiState
+import com.example.util.CurrencyFormatter
+import java.math.BigDecimal
 
 enum class EarningsSubTab(val title: String) {
     TRANSACTIONS("Wallet Log"),
@@ -49,6 +53,7 @@ fun EarningsScreen(
 ) {
     var activeSubTab by remember { mutableStateOf(EarningsSubTab.TRANSACTIONS) }
     var showWithdrawalDialog by remember { mutableStateOf(false) }
+    var isHowEarningsWorkExpanded by remember { mutableStateOf(true) }
 
     Column(
         modifier = modifier
@@ -123,7 +128,7 @@ fun EarningsScreen(
             }
         }
 
-        // Balance Header Card (Deep Spruce Polish)
+        // Balance & Overview Section (Spruce Polish)
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
@@ -135,8 +140,8 @@ fun EarningsScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                    .padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -145,22 +150,61 @@ fun EarningsScreen(
                 ) {
                     Column {
                         Text(
-                            text = "Total Running Balance",
+                            text = "Total Wallet Balance",
                             style = MaterialTheme.typography.bodySmall,
-                            color = Color.White.copy(alpha = 0.8f)
+                            color = Color.White.copy(alpha = 0.82f)
                         )
-                        Spacer(modifier = Modifier.height(4.dp))
+                        Spacer(modifier = Modifier.height(3.dp))
                         Text(
-                            text = "₹${"%.2f".format(state.runningBalance)}",
+                            text = if (state.hasValidWalletBalance || !state.isWalletBalanceError) {
+                                CurrencyFormatter.format(state.runningBalance)
+                            } else {
+                                "--"
+                            },
                             fontSize = 30.sp,
                             fontWeight = FontWeight.ExtraBold,
                             color = Color.White
                         )
+                        if (state.isWalletBalanceError) {
+                            Spacer(modifier = Modifier.height(3.dp))
+                            Surface(
+                                color = Color.White.copy(alpha = 0.2f),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable { onRefresh() }
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Refresh,
+                                        contentDescription = "Retry",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(12.dp)
+                                    )
+                                    Text(
+                                        text = if (state.hasValidWalletBalance) "Cached balance (update failed) • Tap to retry" else "Balance unavailable • Tap to retry",
+                                        fontSize = 11.sp,
+                                        color = Color.White,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                            }
+                        } else {
+                            Text(
+                                text = "Food subtotal earned from delivered orders",
+                                fontSize = 11.sp,
+                                color = Color.White.copy(alpha = 0.7f)
+                            )
+                        }
                     }
 
                     Box(
                         modifier = Modifier
-                            .size(48.dp)
+                            .size(46.dp)
                             .clip(RoundedCornerShape(14.dp))
                             .background(Color.White.copy(alpha = 0.2f)),
                         contentAlignment = Alignment.Center
@@ -169,33 +213,230 @@ fun EarningsScreen(
                             imageVector = Icons.Default.AccountBalanceWallet,
                             contentDescription = null,
                             tint = Color.White,
-                            modifier = Modifier.size(26.dp)
+                            modifier = Modifier.size(24.dp)
                         )
                     }
                 }
 
-                Button(
-                    onClick = { showWithdrawalDialog = true },
-                    shape = RoundedCornerShape(16.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = SpruceContainerLight,
-                        contentColor = SprucePrimary
-                    ),
-                    contentPadding = PaddingValues(vertical = 12.dp),
-                    modifier = Modifier.fillMaxWidth()
+                // Metric Cards: In Progress & Available to Withdraw
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Payments,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        "REQUEST WITHDRAWAL",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 13.sp,
-                        letterSpacing = 0.5.sp
-                    )
+                    // In Progress Card
+                    Surface(
+                        modifier = Modifier.weight(1f),
+                        color = Color.White.copy(alpha = 0.14f),
+                        shape = RoundedCornerShape(14.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Schedule,
+                                    contentDescription = null,
+                                    tint = PolishAmberLight,
+                                    modifier = Modifier.size(13.dp)
+                                )
+                                Text(
+                                    text = "In Progress",
+                                    fontSize = 11.sp,
+                                    color = Color.White.copy(alpha = 0.85f),
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = CurrencyFormatter.format(state.inProgressWithdrawalsSum),
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                            Text(
+                                text = if (state.activeWithdrawalInProgress != null) "Under admin review" else "None pending",
+                                fontSize = 10.sp,
+                                color = Color.White.copy(alpha = 0.7f),
+                                maxLines = 1
+                            )
+                        }
+                    }
+
+                    // Available to Withdraw Card
+                    Surface(
+                        modifier = Modifier.weight(1f),
+                        color = Color.White.copy(alpha = 0.14f),
+                        shape = RoundedCornerShape(14.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.CheckCircle,
+                                    contentDescription = null,
+                                    tint = PolishEmeraldLight,
+                                    modifier = Modifier.size(13.dp)
+                                )
+                                Text(
+                                    text = "Available to Withdraw",
+                                    fontSize = 11.sp,
+                                    color = Color.White.copy(alpha = 0.85f),
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = CurrencyFormatter.format(state.availableToWithdraw),
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = PolishEmeraldLight
+                            )
+                            Text(
+                                text = "Commission: ${state.commissionPercent.toInt()}% on payout",
+                                fontSize = 10.sp,
+                                color = Color.White.copy(alpha = 0.7f),
+                                maxLines = 1
+                            )
+                        }
+                    }
+                }
+
+                // Request Withdrawal Button or In-Progress Indicator
+                if (state.activeWithdrawalInProgress != null) {
+                    Button(
+                        onClick = { },
+                        enabled = false,
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            disabledContainerColor = PolishAmberLight,
+                            disabledContentColor = PolishAmberDark
+                        ),
+                        contentPadding = PaddingValues(vertical = 12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Schedule,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "A request is already in progress",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp,
+                            letterSpacing = 0.5.sp
+                        )
+                    }
+                } else {
+                    Button(
+                        onClick = { showWithdrawalDialog = true },
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = SpruceContainerLight,
+                            contentColor = SprucePrimary
+                        ),
+                        contentPadding = PaddingValues(vertical = 12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Payments,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            "REQUEST WITHDRAWAL",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp,
+                            letterSpacing = 0.5.sp
+                        )
+                    }
+                }
+            }
+        }
+
+        // Expandable In-App Info Card: How your earnings work (Rule 3)
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 2.dp),
+            shape = RoundedCornerShape(16.dp),
+            color = SpruceContainerLight.copy(alpha = 0.7f),
+            border = BorderStroke(1.dp, SpruceBorderLight.copy(alpha = 0.6f))
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 10.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Info,
+                            contentDescription = null,
+                            tint = SprucePrimary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = "How your earnings work",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp,
+                            color = SpruceOnContainer
+                        )
+                    }
+                    IconButton(
+                        onClick = { isHowEarningsWorkExpanded = !isHowEarningsWorkExpanded },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (isHowEarningsWorkExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                            contentDescription = if (isHowEarningsWorkExpanded) "Collapse" else "Expand",
+                            tint = SprucePrimary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+
+                if (isHowEarningsWorkExpanded) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    HorizontalDivider(color = SpruceBorderLight.copy(alpha = 0.5f))
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            text = "• When an order is delivered, the food subtotal is added to your wallet balance.",
+                            fontSize = 12.sp,
+                            color = Slate700,
+                            lineHeight = 16.sp
+                        )
+                        Text(
+                            text = "• You can request a withdrawal at any time up to your available balance.",
+                            fontSize = 12.sp,
+                            color = Slate700,
+                            lineHeight = 16.sp
+                        )
+                        Text(
+                            text = "• Commission (${state.commissionPercent.toInt()}%) is deducted when your withdrawal is paid out to your bank account.",
+                            fontSize = 12.sp,
+                            color = Slate700,
+                            lineHeight = 16.sp
+                        )
+                        Text(
+                            text = "• For questions or faster payouts, contact your City Admin.",
+                            fontSize = 12.sp,
+                            color = Slate700,
+                            lineHeight = 16.sp
+                        )
+                    }
                 }
             }
         }
@@ -245,7 +486,41 @@ fun EarningsScreen(
                         }
                     } else {
                         items(state.walletTransactions, key = { it.id }) { tx ->
-                            val isDebit = tx.type.lowercase() in listOf("debit", "withdrawal")
+                            val kind = tx.kind
+                            val amountBd = CurrencyFormatter.toBigDecimal(tx.amount) ?: BigDecimal.ZERO
+                            val isNegative = tx.amount < 0.0
+
+                            val badgeBg = when (kind) {
+                                WalletTransactionKind.CREDIT -> SpruceContainerLight
+                                WalletTransactionKind.DEBIT -> PolishRoseLight
+                                WalletTransactionKind.NEUTRAL -> if (isNegative) PolishRoseLight else PolishSurfaceLight
+                            }
+                            val iconTint = when (kind) {
+                                WalletTransactionKind.CREDIT -> SprucePrimary
+                                WalletTransactionKind.DEBIT -> PolishRose
+                                WalletTransactionKind.NEUTRAL -> if (isNegative) PolishRose else Slate600
+                            }
+                            val iconVec = when (kind) {
+                                WalletTransactionKind.CREDIT -> Icons.Default.ArrowDownward
+                                WalletTransactionKind.DEBIT -> Icons.Default.ArrowUpward
+                                WalletTransactionKind.NEUTRAL -> if (isNegative) Icons.Default.ArrowUpward else Icons.Default.SwapHoriz
+                            }
+                            val amountStr = when (kind) {
+                                WalletTransactionKind.CREDIT -> "+${CurrencyFormatter.format(amountBd)}"
+                                WalletTransactionKind.DEBIT -> "-${CurrencyFormatter.format(amountBd.abs())}"
+                                WalletTransactionKind.NEUTRAL -> if (isNegative) "-${CurrencyFormatter.format(amountBd.abs())}" else CurrencyFormatter.format(amountBd)
+                            }
+                            val amountColor = when (kind) {
+                                WalletTransactionKind.CREDIT -> PolishEmeraldDark
+                                WalletTransactionKind.DEBIT -> PolishRose
+                                WalletTransactionKind.NEUTRAL -> if (isNegative) PolishRose else Slate800
+                            }
+                            val defaultDesc = when (kind) {
+                                WalletTransactionKind.CREDIT -> "Order Earning"
+                                WalletTransactionKind.DEBIT -> if (tx.type.equals("withdrawal", ignoreCase = true)) "Withdrawal Payout" else if (tx.type.equals("penalty", ignoreCase = true)) "Penalty Deduction" else "Debit Transaction"
+                                WalletTransactionKind.NEUTRAL -> tx.type.replace('_', ' ').replaceFirstChar { it.uppercase() }
+                            }
+
                             Surface(
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(18.dp),
@@ -268,19 +543,19 @@ fun EarningsScreen(
                                             modifier = Modifier
                                                 .size(40.dp)
                                                 .clip(CircleShape)
-                                                .background(if (isDebit) PolishRoseLight else SpruceContainerLight),
+                                                .background(badgeBg),
                                             contentAlignment = Alignment.Center
                                         ) {
                                             Icon(
-                                                imageVector = if (isDebit) Icons.Default.ArrowUpward else Icons.Default.ArrowDownward,
+                                                imageVector = iconVec,
                                                 contentDescription = null,
-                                                tint = if (isDebit) PolishRose else SprucePrimary,
+                                                tint = iconTint,
                                                 modifier = Modifier.size(20.dp)
                                             )
                                         }
                                         Column {
                                             Text(
-                                                text = tx.description ?: if (isDebit) "Debit Transaction" else "Order Earning",
+                                                text = tx.description ?: defaultDesc,
                                                 fontWeight = FontWeight.SemiBold,
                                                 fontSize = 14.sp,
                                                 color = Slate900
@@ -294,10 +569,10 @@ fun EarningsScreen(
                                     }
 
                                     Text(
-                                        text = "${if (isDebit) "-" else "+"}₹${"%.2f".format(tx.amount)}",
+                                        text = amountStr,
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 15.sp,
-                                        color = if (isDebit) PolishRose else PolishEmeraldDark
+                                        color = amountColor
                                     )
                                 }
                             }
@@ -346,11 +621,15 @@ fun EarningsScreen(
                             EmptyStateCard(
                                 icon = Icons.Outlined.Payments,
                                 title = "No withdrawal requests",
-                                description = "Request payouts anytime to transfer wallet balance to your bank."
+                                description = "Request payouts anytime to transfer available balance to your bank."
                             )
                         }
                     } else {
                         items(state.withdrawals, key = { it.id }) { withdrawal ->
+                            val commRate = state.commissionPercent
+                            val commAmount = withdrawal.commissionAmount ?: (withdrawal.amount * commRate / 100.0)
+                            val netPayable = withdrawal.netPayableAmount ?: (withdrawal.amount - commAmount)
+
                             Surface(
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(18.dp),
@@ -369,15 +648,134 @@ fun EarningsScreen(
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Text(
-                                            text = "₹${"%.2f".format(withdrawal.amount)}",
+                                            text = CurrencyFormatter.format(withdrawal.amount),
                                             fontWeight = FontWeight.Bold,
-                                            fontSize = 16.sp,
+                                            fontSize = 17.sp,
                                             color = Slate900
                                         )
-                                        StatusBadge(status = withdrawal.status)
+                                        WithdrawalStatusBadge(status = withdrawal.status)
                                     }
 
-                                    if (!withdrawal.note.isNullOrBlank()) {
+                                    when (withdrawal.status.lowercase()) {
+                                        "pending", "approved" -> {
+                                            Surface(
+                                                color = PolishAmberLight.copy(alpha = 0.5f),
+                                                shape = RoundedCornerShape(10.dp),
+                                                border = BorderStroke(1.dp, PolishAmberDark.copy(alpha = 0.2f)),
+                                                modifier = Modifier.fillMaxWidth()
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Info,
+                                                        contentDescription = null,
+                                                        tint = PolishAmberDark,
+                                                        modifier = Modifier.size(15.dp)
+                                                    )
+                                                    Text(
+                                                        text = "Under review by City Admin",
+                                                        fontSize = 12.sp,
+                                                        color = PolishAmberDark,
+                                                        fontWeight = FontWeight.Medium
+                                                    )
+                                                }
+                                            }
+
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween
+                                            ) {
+                                                Text(
+                                                    text = "Est. bank payout (${commRate.toInt()}% comm.):",
+                                                    fontSize = 12.sp,
+                                                    color = Slate500
+                                                )
+                                                Text(
+                                                    text = CurrencyFormatter.format(netPayable),
+                                                    fontSize = 12.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = Slate800
+                                                )
+                                            }
+                                        }
+
+                                        "paid" -> {
+                                            Surface(
+                                                color = PolishEmeraldLight.copy(alpha = 0.4f),
+                                                shape = RoundedCornerShape(10.dp),
+                                                modifier = Modifier.fillMaxWidth()
+                                            ) {
+                                                Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
+                                                    Row(
+                                                        modifier = Modifier.fillMaxWidth(),
+                                                        horizontalArrangement = Arrangement.SpaceBetween
+                                                    ) {
+                                                        Text("Requested:", fontSize = 11.5.sp, color = Slate600)
+                                                        Text(CurrencyFormatter.format(withdrawal.amount), fontSize = 11.5.sp, color = Slate700)
+                                                    }
+                                                    Row(
+                                                        modifier = Modifier.fillMaxWidth(),
+                                                        horizontalArrangement = Arrangement.SpaceBetween
+                                                    ) {
+                                                        Text("Commission (${commRate.toInt()}%):", fontSize = 11.5.sp, color = PolishRoseDark)
+                                                        Text("-${CurrencyFormatter.format(commAmount)}", fontSize = 11.5.sp, color = PolishRoseDark, fontWeight = FontWeight.SemiBold)
+                                                    }
+                                                    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp), color = PolishEmeraldDark.copy(alpha = 0.2f))
+                                                    Row(
+                                                        modifier = Modifier.fillMaxWidth(),
+                                                        horizontalArrangement = Arrangement.SpaceBetween
+                                                    ) {
+                                                        Text("Credited to Bank:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = PolishEmeraldDark)
+                                                        Text(CurrencyFormatter.format(netPayable), fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = PolishEmeraldDark)
+                                                    }
+                                                }
+                                            }
+
+                                            if (!withdrawal.paidAt.isNullOrBlank()) {
+                                                Text(
+                                                    text = "Paid date: ${withdrawal.paidAt.take(10)}",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = PolishEmeraldDark,
+                                                    fontWeight = FontWeight.Medium
+                                                )
+                                            }
+                                        }
+
+                                        "rejected" -> {
+                                            val reason = withdrawal.rejectionReason?.takeIf { it.isNotBlank() }
+                                                ?: withdrawal.note?.takeIf { it.isNotBlank() }
+                                            Surface(
+                                                color = PolishRoseLight,
+                                                shape = RoundedCornerShape(10.dp),
+                                                border = BorderStroke(1.dp, PolishRose.copy(alpha = 0.3f)),
+                                                modifier = Modifier.fillMaxWidth()
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.ErrorOutline,
+                                                        contentDescription = null,
+                                                        tint = PolishRose,
+                                                        modifier = Modifier.size(15.dp)
+                                                    )
+                                                    Text(
+                                                        text = if (reason != null) "Rejected: $reason" else "Request was rejected by City Admin",
+                                                        fontSize = 12.sp,
+                                                        color = PolishRoseDark,
+                                                        fontWeight = FontWeight.Medium
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    if (!withdrawal.note.isNullOrBlank() && withdrawal.status.lowercase() != "rejected") {
                                         Text(
                                             text = "Note: ${withdrawal.note}",
                                             style = MaterialTheme.typography.bodySmall,
@@ -433,7 +831,7 @@ fun EarningsScreen(
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Text(
-                                            text = "Net Payout: ₹${"%.2f".format(payout.netAmount)}",
+                                            text = "Net Payout: ${CurrencyFormatter.format(payout.netAmount)}",
                                             fontWeight = FontWeight.Bold,
                                             fontSize = 15.sp,
                                             color = PolishEmeraldDark
@@ -446,12 +844,12 @@ fun EarningsScreen(
                                         horizontalArrangement = Arrangement.SpaceBetween
                                     ) {
                                         Text(
-                                            text = "Gross: ₹${"%.2f".format(payout.grossAmount)}",
+                                            text = "Gross: ${CurrencyFormatter.format(payout.grossAmount)}",
                                             fontSize = 12.sp,
                                             color = Slate500
                                         )
                                         Text(
-                                            text = "Commission: -₹${"%.2f".format(payout.commissionAmount)}",
+                                            text = "Commission: -${CurrencyFormatter.format(payout.commissionAmount)}",
                                             fontSize = 12.sp,
                                             color = PolishRose
                                         )
@@ -477,27 +875,34 @@ fun EarningsScreen(
     if (showWithdrawalDialog) {
         val context = LocalContext.current
         var amountStr by remember { mutableStateOf("") }
-        var note by remember { mutableStateOf("") }
         var errorMsg by remember { mutableStateOf<String?>(null) }
         var showConfirmSubmit by remember { mutableStateOf(false) }
+        var isSubmittingLocally by remember { mutableStateOf(false) }
 
+        val hasActiveRequest = state.activeWithdrawalInProgress != null
+        val available = state.availableToWithdraw
+        val commPercent = state.commissionPercent
         val parsedAmount = amountStr.toDoubleOrNull()
-        val exceedsVisibleBalance = parsedAmount != null && parsedAmount > state.runningBalance
+        val exceedsAvailable = parsedAmount != null && parsedAmount > available
         val isInvalidAmount = parsedAmount != null && parsedAmount <= 0.0
 
         if (showConfirmSubmit) {
             val amount = parsedAmount ?: 0.0
+            val estCommission = amount * (commPercent / 100.0)
+            val estNet = amount - estCommission
+
             ConfirmationDialog(
                 title = "Confirm Withdrawal",
-                message = if (amount > state.runningBalance) {
-                    "Requested amount of ₹${"%.2f".format(amount)} exceeds your currently displayed balance (₹${"%.2f".format(state.runningBalance)}). Submit anyway to verify against live server balance?"
-                } else {
-                    "Are you sure you want to request a payout of ₹${"%.2f".format(amount)} to your bank account?"
-                },
+                message = "Are you sure you want to request a payout of ${CurrencyFormatter.format(amount)} to your bank account?\n\n" +
+                        "• Requested: ${CurrencyFormatter.format(amount)}\n" +
+                        "• Commission (${commPercent.toInt()}%): -${CurrencyFormatter.format(estCommission)}\n" +
+                        "• You will receive in bank: ${CurrencyFormatter.format(estNet)}",
                 confirmText = "Submit Request",
-                isLoading = state.isSubmittingWithdrawal,
+                isLoading = state.isSubmittingWithdrawal || isSubmittingLocally,
                 onConfirm = {
-                    onRequestWithdrawal(amount, note.ifBlank { null }) { success, err ->
+                    isSubmittingLocally = true
+                    onRequestWithdrawal(amount, null) { success, err ->
+                        isSubmittingLocally = false
                         if (success) {
                             showConfirmSubmit = false
                             showWithdrawalDialog = false
@@ -510,13 +915,13 @@ fun EarningsScreen(
                     }
                 },
                 onDismiss = {
-                    if (!state.isSubmittingWithdrawal) showConfirmSubmit = false
+                    if (!state.isSubmittingWithdrawal && !isSubmittingLocally) showConfirmSubmit = false
                 }
             )
         } else {
             AlertDialog(
                 onDismissRequest = {
-                    if (!state.isSubmittingWithdrawal) showWithdrawalDialog = false
+                    if (!state.isSubmittingWithdrawal && !isSubmittingLocally) showWithdrawalDialog = false
                 },
                 title = {
                     Row(
@@ -544,65 +949,126 @@ fun EarningsScreen(
                             border = BorderStroke(1.dp, PolishEmeraldDark.copy(alpha = 0.25f)),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Row(
+                            Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(horizontal = 14.dp, vertical = 10.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(34.dp)
-                                            .clip(CircleShape)
-                                            .background(PolishEmeraldDark.copy(alpha = 0.12f)),
-                                        contentAlignment = Alignment.Center
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
-                                        Icon(
-                                            imageVector = Icons.Default.AccountBalanceWallet,
-                                            contentDescription = null,
-                                            tint = PolishEmeraldDark,
-                                            modifier = Modifier.size(18.dp)
-                                        )
+                                        Box(
+                                            modifier = Modifier
+                                                .size(34.dp)
+                                                .clip(CircleShape)
+                                                .background(PolishEmeraldDark.copy(alpha = 0.12f)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.AccountBalanceWallet,
+                                                contentDescription = null,
+                                                tint = PolishEmeraldDark,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                        Column {
+                                            Text(
+                                                text = "Available to Withdraw",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = Slate600
+                                            )
+                                            Text(
+                                                text = CurrencyFormatter.format(available),
+                                                style = MaterialTheme.typography.titleMedium,
+                                                fontWeight = FontWeight.ExtraBold,
+                                                color = PolishEmeraldDark
+                                            )
+                                        }
                                     }
-                                    Column {
-                                        Text(
-                                            text = "Available Balance",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = Slate600
-                                        )
-                                        Text(
-                                            text = "₹${"%.2f".format(state.runningBalance)}",
-                                            style = MaterialTheme.typography.titleMedium,
-                                            fontWeight = FontWeight.ExtraBold,
-                                            color = PolishEmeraldDark
-                                        )
+
+                                    if (available > 0 && !hasActiveRequest) {
+                                        FilledTonalButton(
+                                            onClick = {
+                                                amountStr = if (available % 1.0 == 0.0) {
+                                                    available.toLong().toString()
+                                                } else {
+                                                    CurrencyFormatter.toBigDecimal(available)?.toPlainString() ?: available.toString()
+                                                }
+                                                errorMsg = null
+                                            },
+                                            shape = RoundedCornerShape(8.dp),
+                                            colors = ButtonDefaults.filledTonalButtonColors(
+                                                containerColor = PolishEmeraldDark.copy(alpha = 0.15f),
+                                                contentColor = PolishEmeraldDark
+                                            ),
+                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                                            modifier = Modifier.height(28.dp)
+                                        ) {
+                                            Text("Withdraw all", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                        }
                                     }
                                 }
 
-                                if (state.runningBalance > 0) {
-                                    FilledTonalButton(
-                                        onClick = {
-                                            amountStr = if (state.runningBalance % 1.0 == 0.0) {
-                                                state.runningBalance.toLong().toString()
-                                            } else {
-                                                "%.2f".format(state.runningBalance)
-                                            }
-                                            errorMsg = null
-                                        },
-                                        shape = RoundedCornerShape(8.dp),
-                                        colors = ButtonDefaults.filledTonalButtonColors(
-                                            containerColor = PolishEmeraldDark.copy(alpha = 0.15f),
-                                            contentColor = PolishEmeraldDark
-                                        ),
-                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
-                                        modifier = Modifier.height(28.dp)
-                                    ) {
-                                        Text("Use Max", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = "Total balance: ${CurrencyFormatter.format(state.runningBalance)}",
+                                        fontSize = 11.sp,
+                                        color = Slate500
+                                    )
+                                    Text(
+                                        text = "Commission: ${commPercent.toInt()}%",
+                                        fontSize = 11.sp,
+                                        color = Slate600,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
+                            }
+                        }
+
+                        // Check if an existing withdrawal is in progress (Rule 2)
+                        if (hasActiveRequest) {
+                            val activeReq = state.activeWithdrawalInProgress!!
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = PolishAmberLight,
+                                border = BorderStroke(1.dp, PolishAmberDark.copy(alpha = 0.35f)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.Top,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Schedule,
+                                        contentDescription = null,
+                                        tint = PolishAmberDark,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Column {
+                                        Text(
+                                            text = "Request already in progress",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 13.sp,
+                                            color = PolishAmberDark
+                                        )
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = "You already have a withdrawal request of ${CurrencyFormatter.format(activeReq.amount)} in progress. Please wait for City Admin to process it before requesting another.",
+                                            fontSize = 12.sp,
+                                            color = PolishAmberDark,
+                                            lineHeight = 16.sp
+                                        )
                                     }
                                 }
                             }
@@ -629,7 +1095,7 @@ fun EarningsScreen(
                                     )
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(
-                                            text = "Withdrawal Failed",
+                                            text = "Withdrawal Notice",
                                             style = MaterialTheme.typography.labelMedium,
                                             fontWeight = FontWeight.Bold,
                                             color = PolishRoseDark
@@ -646,106 +1112,183 @@ fun EarningsScreen(
                             }
                         }
 
-                        // 3. Amount Input
-                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            OutlinedTextField(
-                                value = amountStr,
-                                onValueChange = {
-                                    amountStr = it
-                                    errorMsg = null
-                                },
-                                label = { Text("Amount (₹) *") },
-                                placeholder = { Text("0.00") },
-                                leadingIcon = {
-                                    Text("₹", fontWeight = FontWeight.Bold, color = Slate600, fontSize = 16.sp)
-                                },
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                                singleLine = true,
-                                isError = exceedsVisibleBalance || isInvalidAmount,
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(12.dp)
-                            )
+                        // 3. Amount Input (only if no active request)
+                        if (!hasActiveRequest) {
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                OutlinedTextField(
+                                    value = amountStr,
+                                    onValueChange = {
+                                        amountStr = it
+                                        errorMsg = null
+                                    },
+                                    label = { Text("Amount (₹) *") },
+                                    placeholder = { Text("0.00") },
+                                    leadingIcon = {
+                                        Text("₹", fontWeight = FontWeight.Bold, color = Slate600, fontSize = 16.sp)
+                                    },
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                    singleLine = true,
+                                    isError = exceedsAvailable || isInvalidAmount,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(12.dp)
+                                )
 
-                            // Client-side inline warning when entered amount exceeds visible balance
-                            if (exceedsVisibleBalance) {
-                                Surface(
-                                    shape = RoundedCornerShape(10.dp),
-                                    color = PolishAmberLight,
-                                    border = BorderStroke(1.dp, PolishAmberDark.copy(alpha = 0.35f)),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-                                        verticalAlignment = Alignment.Top,
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                // Real-time calculation card (Rule 2)
+                                if (parsedAmount != null && parsedAmount > 0) {
+                                    val estCommission = parsedAmount * (commPercent / 100.0)
+                                    val estNet = (parsedAmount - estCommission).coerceAtLeast(0.0)
+
+                                    Surface(
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = PolishBackgroundLight,
+                                        border = BorderStroke(1.dp, PolishBorderLight),
+                                        modifier = Modifier.fillMaxWidth()
                                     ) {
-                                        Icon(
-                                            imageVector = Icons.Default.WarningAmber,
-                                            contentDescription = null,
-                                            tint = PolishAmberDark,
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                        Text(
-                                            text = "Amount exceeds visible balance (₹${"%.2f".format(state.runningBalance)}). The server will check live available funds upon submission.",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            fontSize = 11.5.sp,
-                                            color = PolishAmberDark,
-                                            lineHeight = 15.sp
-                                        )
+                                        Column(
+                                            modifier = Modifier.padding(12.dp),
+                                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween
+                                            ) {
+                                                Text("Requested Amount:", fontSize = 12.sp, color = Slate600)
+                                                Text(CurrencyFormatter.format(parsedAmount), fontSize = 12.sp, color = Slate800, fontWeight = FontWeight.SemiBold)
+                                            }
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween
+                                            ) {
+                                                Text("Commission (${commPercent.toInt()}%):", fontSize = 12.sp, color = PolishRoseDark)
+                                                Text("-${CurrencyFormatter.format(estCommission)}", fontSize = 12.sp, color = PolishRoseDark, fontWeight = FontWeight.SemiBold)
+                                            }
+                                            HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp), color = PolishBorderLight)
+                                            Text(
+                                                text = "You will receive approx ${CurrencyFormatter.format(estNet)} after ${commPercent.toInt()}% commission (final amount is decided when paid).",
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = PolishEmeraldDark,
+                                                lineHeight = 16.sp
+                                            )
+                                        }
+                                    }
+                                }
+
+                                // Client-side inline warning when entered amount exceeds available balance
+                                if (exceedsAvailable) {
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = PolishRoseLight,
+                                        border = BorderStroke(1.dp, PolishRose.copy(alpha = 0.35f)),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                            verticalAlignment = Alignment.Top,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.WarningAmber,
+                                                contentDescription = null,
+                                                tint = PolishRoseDark,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Text(
+                                                text = "Withdrawal amount ${CurrencyFormatter.format(parsedAmount ?: 0.0)} exceeds available balance ${CurrencyFormatter.format(available)}",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                fontSize = 11.5.sp,
+                                                color = PolishRoseDark,
+                                                lineHeight = 15.sp
+                                            )
+                                        }
                                     }
                                 }
                             }
                         }
-
-                        // 4. Note Input
-                        OutlinedTextField(
-                            value = note,
-                            onValueChange = { note = it },
-                            label = { Text("Note / Remarks (Optional)") },
-                            placeholder = { Text("e.g. Bank transfer request") },
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(12.dp),
-                            maxLines = 2
-                        )
                     }
                 },
                 confirmButton = {
-                    Button(
-                        onClick = {
-                            val amount = amountStr.toDoubleOrNull()
-                            if (amount == null || amount <= 0) {
-                                errorMsg = "Please enter a valid amount greater than 0"
-                                return@Button
+                    if (!hasActiveRequest) {
+                        Button(
+                            onClick = {
+                                val amount = amountStr.toDoubleOrNull()
+                                if (amount == null || amount <= 0) {
+                                    errorMsg = "Please enter a valid amount greater than 0"
+                                    return@Button
+                                }
+                                if (amount > available) {
+                                    errorMsg = "Withdrawal amount ${CurrencyFormatter.format(amount)} exceeds available balance ${CurrencyFormatter.format(available)}"
+                                    return@Button
+                                }
+                                showConfirmSubmit = true
+                            },
+                            enabled = !state.isSubmittingWithdrawal && !isSubmittingLocally && parsedAmount != null && parsedAmount > 0 && parsedAmount <= available,
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = SprucePrimary)
+                        ) {
+                            if (state.isSubmittingWithdrawal || isSubmittingLocally) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    color = Color.White,
+                                    strokeWidth = 2.dp
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Submitting...")
+                            } else {
+                                Text("Proceed", fontWeight = FontWeight.Bold)
                             }
-                            showConfirmSubmit = true
-                        },
-                        enabled = !state.isSubmittingWithdrawal,
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = SprucePrimary)
-                    ) {
-                        if (state.isSubmittingWithdrawal) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(16.dp),
-                                color = Color.White,
-                                strokeWidth = 2.dp
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Submitting...")
-                        } else {
-                            Text("Proceed", fontWeight = FontWeight.Bold)
                         }
                     }
                 },
                 dismissButton = {
                     OutlinedButton(
                         onClick = { showWithdrawalDialog = false },
-                        enabled = !state.isSubmittingWithdrawal,
+                        enabled = !state.isSubmittingWithdrawal && !isSubmittingLocally,
                         shape = RoundedCornerShape(12.dp)
                     ) {
-                        Text("Cancel")
+                        Text(if (hasActiveRequest) "Close" else "Cancel")
                     }
                 },
                 shape = RoundedCornerShape(24.dp)
+            )
+        }
+    }
+}
+
+@Composable
+fun WithdrawalStatusBadge(
+    status: String,
+    modifier: Modifier = Modifier
+) {
+    val (bgColor, textColor, icon, label) = when (status.lowercase()) {
+        "pending" -> listOf(PolishAmberLight, PolishAmberDark, Icons.Default.Schedule, "Pending Admin Approval")
+        "approved" -> listOf(PolishBlueLight, PolishBlue, Icons.Default.CheckCircle, "Approved - Processing Payment")
+        "paid" -> listOf(PolishEmeraldLight, PolishEmeraldDark, Icons.Default.CheckCircle, "Paid to Bank")
+        "rejected" -> listOf(PolishRoseLight, PolishRose, Icons.Default.Cancel, "Rejected")
+        else -> listOf(Slate100, Slate700, Icons.Default.Info, status.replaceFirstChar { it.uppercase() })
+    }
+
+    Surface(
+        color = bgColor as Color,
+        shape = RoundedCornerShape(50),
+        modifier = modifier
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Icon(
+                imageVector = icon as androidx.compose.ui.graphics.vector.ImageVector,
+                contentDescription = null,
+                tint = textColor as Color,
+                modifier = Modifier.size(13.dp)
+            )
+            Text(
+                text = label as String,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = textColor
             )
         }
     }

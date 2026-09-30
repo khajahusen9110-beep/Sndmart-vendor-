@@ -2,6 +2,7 @@ package com.example.data.local
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.example.data.model.AppVersionInfo
 import com.example.data.model.Vendor
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
@@ -10,6 +11,7 @@ class SessionManager(context: Context) {
     private val prefs: SharedPreferences = context.getSharedPreferences("sndmart_vendor_prefs", Context.MODE_PRIVATE)
     private val moshi = Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build()
     private val vendorAdapter = moshi.adapter(Vendor::class.java)
+    private val appVersionAdapter = moshi.adapter(AppVersionInfo::class.java)
 
     companion object {
         private const val KEY_ACCESS_TOKEN = "access_token"
@@ -117,6 +119,53 @@ class SessionManager(context: Context) {
 
     val isLoggedIn: Boolean
         get() = !accessToken.isNullOrEmpty() && !userId.isNullOrEmpty()
+
+    var hasSeenAutostartTip: Boolean
+        get() = prefs.getBoolean("has_seen_autostart_tip", false)
+        set(value) = prefs.edit().putBoolean("has_seen_autostart_tip", value).apply()
+
+    var lastVersionCheckTimestamp: Long
+        get() = prefs.getLong("last_version_check_time", 0L)
+        set(value) = prefs.edit().putLong("last_version_check_time", value).apply()
+
+    var lastDismissedOptionalVersionCode: Int
+        get() = prefs.getInt("last_dismissed_opt_version_code", -1)
+        set(value) = prefs.edit().putInt("last_dismissed_opt_version_code", value).apply()
+
+    var lastDismissedOptionalVersionName: String?
+        get() = prefs.getString("last_dismissed_opt_version_name", null)
+        set(value) = prefs.edit().putString("last_dismissed_opt_version_name", value).apply()
+
+    fun setOptionalUpdateDismissed(code: Int?, name: String?) {
+        val editor = prefs.edit()
+        if (code != null) editor.putInt("last_dismissed_opt_version_code", code)
+        if (name != null) editor.putString("last_dismissed_opt_version_name", name)
+        editor.apply()
+    }
+
+    var cachedForceUpdateInfo: AppVersionInfo?
+        get() {
+            val json = prefs.getString("cached_force_update_info", null) ?: return null
+            return try {
+                appVersionAdapter.fromJson(json)
+            } catch (_: Exception) {
+                null
+            }
+        }
+        set(value) {
+            if (value != null) {
+                try {
+                    val json = appVersionAdapter.toJson(value)
+                    prefs.edit().putString("cached_force_update_info", json).apply()
+                } catch (_: Exception) {}
+            } else {
+                prefs.edit().remove("cached_force_update_info").apply()
+            }
+        }
+
+    fun clearCachedForceUpdate() {
+        cachedForceUpdateInfo = null
+    }
 
     fun clearSession() {
         prefs.edit()

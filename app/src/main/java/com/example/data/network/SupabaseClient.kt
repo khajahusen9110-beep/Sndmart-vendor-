@@ -1,5 +1,6 @@
 package com.example.data.network
 
+import com.example.BuildConfig
 import com.example.data.local.SessionManager
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
@@ -95,7 +96,7 @@ class SupabaseClient(private val sessionManager: SessionManager) {
     }
 
     private val loggingInterceptor = HttpLoggingInterceptor().apply {
-        level = HttpLoggingInterceptor.Level.BODY
+        level = if (BuildConfig.DEBUG) HttpLoggingInterceptor.Level.BODY else HttpLoggingInterceptor.Level.NONE
     }
 
     private val tokenAuthenticator = object : Authenticator {

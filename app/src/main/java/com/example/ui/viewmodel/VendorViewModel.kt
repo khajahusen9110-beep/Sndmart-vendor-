@@ -4,13 +4,17 @@ import android.app.Application
 import android.os.Build
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.BuildConfig
 import com.example.data.local.SessionManager
 import com.example.data.model.*
 import com.example.data.network.SupabaseClient
 import com.example.data.repository.Resource
 import com.example.data.repository.VendorRepository
+import com.example.util.AppUpdateState
 import com.example.util.NotificationHelper
 import com.example.util.SoundAlertManager
+import com.example.util.compareVersionStrings
+import com.example.util.evaluateUpdateState
 import com.google.android.gms.common.ConnectionResult
 import com.google.android.gms.common.GoogleApiAvailability
 import com.google.firebase.messaging.FirebaseMessaging
@@ -27,6 +31,10 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
+import java.math.BigDecimal
+import java.math.RoundingMode
+import com.example.util.CurrencyFormatter
+import com.example.util.IstDateUtils
 
 sealed interface AuthUiState {
     data object Loading : AuthUiState
@@ -58,13 +66,26 @@ data class RegistrationUiState(
 
 data class DashboardUiState(
     val ordersTodayCount: Int = 0,
+    val deliveredOrdersTodayCount: Int = 0,
     val earningsTodaySum: Double = 0.0,
+    val todayEarningsVendorAmount: BigDecimal? = null,
+    val foodSalesTodayDelivered: Double = 0.0,
+    val commissionPercent: Double = 25.0,
     val confirmedOrdersCount: Int = 0, // Orders accepted by City Admin waiting for vendor preparation
     val pendingOrdersCount: Int = 0, // Kept at 0: vendors never see pending orders
     val averageRating: Double = 0.0,
     val walletBalance: Double = 0.0,
+    val hasValidWalletBalance: Boolean = false,
+    val isWalletBalanceError: Boolean = false,
+    val walletErrorMessage: String? = null,
     val recentOrders: List<Order> = emptyList(),
     val isStoreOpen: Boolean = true,
+    val hasNotificationPermission: Boolean = true,
+    val isOrderAlertsOn: Boolean = false,
+    val orderAlertsOffReason: String? = null,
+    val isSendingTestAlert: Boolean = false,
+    val showBatteryOptimizationWarning: Boolean = false,
+    val showAutostartTipDialog: Boolean = false,
     val isLoading: Boolean = false,
     val errorMessage: String? = null
 )
@@ -105,6 +126,13 @@ data class EarningsUiState(
     val payouts: List<Payout> = emptyList(),
     val withdrawals: List<Withdrawal> = emptyList(),
     val runningBalance: Double = 0.0,
+    val hasValidWalletBalance: Boolean = false,
+    val isWalletBalanceError: Boolean = false,
+    val walletErrorMessage: String? = null,
+    val inProgressWithdrawalsSum: Double = 0.0,
+    val availableToWithdraw: Double = 0.0,
+    val commissionPercent: Double = 25.0,
+    val activeWithdrawalInProgress: Withdrawal? = null,
     val page: Int = 0,
     val canLoadMoreTransactions: Boolean = true,
     val isLoadingMoreTransactions: Boolean = false,
@@ -137,14 +165,23 @@ data class ProfileUiState(
     val successMessage: String? = null
 )
 
-const val CURRENT_APP_VERSION = "1.0.0"
+val CURRENT_APP_VERSION: String get() = BuildConfig.VERSION_NAME
 
 data class BlockingUpdateState(
     val isBlocked: Boolean = false,
     val updateMessage: String? = null,
     val minimumSupportedVersion: String? = null,
-    val currentAppVersion: String = CURRENT_APP_VERSION,
+    val currentAppVersion: String = BuildConfig.VERSION_NAME,
     val updateUrl: String? = null
+)
+
+data class OptionalUpdateState(
+    val isAvailable: Boolean = false,
+    val updateMessage: String? = null,
+    val latestVersion: String = "",
+    val currentVersion: String = BuildConfig.VERSION_NAME,
+    val updateUrl: String? = null,
+    val latestVersionCode: Int? = null
 )
 
 data class MaintenanceBannerState(
@@ -153,16 +190,7 @@ data class MaintenanceBannerState(
     val isDismissedForSession: Boolean = false
 )
 
-fun compareVersions(a: String, b: String): Int {
-    val pa = a.split('.').map { it.toIntOrNull() ?: 0 }
-    val pb = b.split('.').map { it.toIntOrNull() ?: 0 }
-    for (i in 0 until 3) {
-        val valA = pa.getOrElse(i) { 0 }
-        val valB = pb.getOrElse(i) { 0 }
-        if (valA != valB) return valA - valB
-    }
-    return 0
-}
+fun compareVersions(a: String, b: String): Int = compareVersionStrings(a, b)
 
 class VendorViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -173,6 +201,9 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
 
     private val _blockingUpdateState = MutableStateFlow(BlockingUpdateState())
     val blockingUpdateState: StateFlow<BlockingUpdateState> = _blockingUpdateState.asStateFlow()
+
+    private val _optionalUpdateState = MutableStateFlow<OptionalUpdateState?>(null)
+    val optionalUpdateState: StateFlow<OptionalUpdateState?> = _optionalUpdateState.asStateFlow()
 
     private val _maintenanceBannerState = MutableStateFlow(MaintenanceBannerState())
     val maintenanceBannerState: StateFlow<MaintenanceBannerState> = _maintenanceBannerState.asStateFlow()
@@ -251,41 +282,129 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
         }
         runStartupChecks()
         checkSession()
+
+        // Low-frequency periodic version check (every 30 minutes)
+        viewModelScope.launch {
+            while (isActive) {
+                delay(30 * 60 * 1000L)
+                checkAppVersion(bypassThrottle = false)
+            }
+        }
     }
 
     fun runStartupChecks() {
+        checkAppVersion(bypassThrottle = true)
+        checkMaintenanceMode()
+    }
+
+    fun checkAppVersion(bypassThrottle: Boolean = false) {
+        val now = System.currentTimeMillis()
+        val lastCheck = sessionManager.lastVersionCheckTimestamp
+        if (!bypassThrottle && (now - lastCheck < 15 * 60 * 1000L)) {
+            if (BuildConfig.DEBUG) {
+                android.util.Log.d("VendorViewModel", "Throttling version check (last check was ${(now - lastCheck) / 1000}s ago)")
+            }
+            return
+        }
+
         viewModelScope.launch {
             try {
-                // 1. App Version Check (Platform: vendor_app)
+                val currentCode = BuildConfig.VERSION_CODE
+                val currentName = BuildConfig.VERSION_NAME
+                val lastDismissedCode = sessionManager.lastDismissedOptionalVersionCode.takeIf { it >= 0 }
+                val lastDismissedName = sessionManager.lastDismissedOptionalVersionName
+                val cachedForce = sessionManager.cachedForceUpdateInfo
+
                 when (val versionRes = repository.getAppVersionInfo("vendor_app")) {
                     is Resource.Success -> {
-                        val versionInfo = versionRes.data
-                        if (versionInfo != null) {
-                            val minVersion = versionInfo.minimumSupportedVersion ?: ""
-                            val isBelowMinimum = if (minVersion.isNotBlank()) {
-                                compareVersions(CURRENT_APP_VERSION, minVersion) < 0
-                            } else false
+                        sessionManager.lastVersionCheckTimestamp = System.currentTimeMillis()
+                        val info = versionRes.data
+                        val updateState = evaluateUpdateState(
+                            currentCode = currentCode,
+                            currentName = currentName,
+                            info = info,
+                            lastDismissedCode = lastDismissedCode,
+                            lastDismissedName = lastDismissedName,
+                            cachedForceInfo = cachedForce
+                        )
 
-                            if (isBelowMinimum || versionInfo.forceUpdate) {
+                        when (updateState) {
+                            is AppUpdateState.ForceUpdate -> {
+                                if (info != null) {
+                                    sessionManager.cachedForceUpdateInfo = info
+                                }
                                 _blockingUpdateState.value = BlockingUpdateState(
                                     isBlocked = true,
-                                    updateMessage = versionInfo.updateMessage,
-                                    minimumSupportedVersion = versionInfo.minimumSupportedVersion,
-                                    currentAppVersion = CURRENT_APP_VERSION,
-                                    updateUrl = versionInfo.updateUrl
+                                    updateMessage = updateState.message,
+                                    minimumSupportedVersion = updateState.requiredVersion,
+                                    currentAppVersion = updateState.currentVersion,
+                                    updateUrl = updateState.updateUrl
                                 )
-                                return@launch
-                            } else {
+                                _optionalUpdateState.value = null
+                            }
+                            is AppUpdateState.OptionalUpdate -> {
+                                sessionManager.clearCachedForceUpdate()
                                 _blockingUpdateState.value = BlockingUpdateState(isBlocked = false)
+                                _optionalUpdateState.value = OptionalUpdateState(
+                                    isAvailable = true,
+                                    updateMessage = updateState.message,
+                                    latestVersion = updateState.latestVersion,
+                                    currentVersion = updateState.currentVersion,
+                                    updateUrl = updateState.updateUrl,
+                                    latestVersionCode = updateState.latestVersionCode
+                                )
+                            }
+                            is AppUpdateState.UpToDate -> {
+                                sessionManager.clearCachedForceUpdate()
+                                _blockingUpdateState.value = BlockingUpdateState(isBlocked = false)
+                                _optionalUpdateState.value = null
                             }
                         }
                     }
                     is Resource.Error -> {
-                        android.util.Log.w("VendorViewModel", "Version check error: ${versionRes.message}")
+                        if (BuildConfig.DEBUG) {
+                            android.util.Log.w("VendorViewModel", "Version check error: ${versionRes.message}")
+                        }
+                        // Fail-open policy: do not block unless a previous FORCE result remains unsatisfied
+                        val fallbackState = evaluateUpdateState(
+                            currentCode = currentCode,
+                            currentName = currentName,
+                            info = null,
+                            lastDismissedCode = lastDismissedCode,
+                            lastDismissedName = lastDismissedName,
+                            cachedForceInfo = cachedForce
+                        )
+
+                        if (fallbackState is AppUpdateState.ForceUpdate) {
+                            _blockingUpdateState.value = BlockingUpdateState(
+                                isBlocked = true,
+                                updateMessage = fallbackState.message,
+                                minimumSupportedVersion = fallbackState.requiredVersion,
+                                currentAppVersion = fallbackState.currentVersion,
+                                updateUrl = fallbackState.updateUrl
+                            )
+                        } else {
+                            _blockingUpdateState.value = BlockingUpdateState(isBlocked = false)
+                        }
                     }
                     Resource.Loading -> {}
                 }
+            } catch (e: Exception) {
+                if (BuildConfig.DEBUG) {
+                    android.util.Log.w("VendorViewModel", "Exception checking app version: ${e.message}")
+                }
+            }
+        }
+    }
 
+    fun dismissOptionalUpdate(latestCode: Int?, latestName: String?) {
+        sessionManager.setOptionalUpdateDismissed(latestCode, latestName)
+        _optionalUpdateState.value = null
+    }
+
+    fun checkMaintenanceMode() {
+        viewModelScope.launch {
+            try {
                 // 2. Platform Maintenance Mode Check (Key: maintenance_mode)
                 when (val settingsRes = repository.getMaintenanceModeSetting()) {
                     is Resource.Success -> {
@@ -306,12 +425,16 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
                         }
                     }
                     is Resource.Error -> {
-                        android.util.Log.w("VendorViewModel", "Maintenance check notice: ${settingsRes.message}")
+                        if (BuildConfig.DEBUG) {
+                            android.util.Log.w("VendorViewModel", "Maintenance check notice: ${settingsRes.message}")
+                        }
                     }
                     Resource.Loading -> {}
                 }
             } catch (e: Exception) {
-                android.util.Log.e("VendorViewModel", "Startup checks exception: ${e.message}", e)
+                if (BuildConfig.DEBUG) {
+                    android.util.Log.w("VendorViewModel", "Maintenance mode error: ${e.message}")
+                }
             }
         }
     }
@@ -332,6 +455,13 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
     fun onAppForegrounded() {
         runStartupChecks()
         if (!sessionManager.isLoggedIn) return
+
+        // Register/verify FCM token on every app resume for approved vendor
+        val cachedVendor = sessionManager.cachedVendor
+        if (cachedVendor != null && cachedVendor.approvalStatus.equals("approved", ignoreCase = true)) {
+            registerClientFcmToken(cachedVendor)
+        }
+
         viewModelScope.launch {
             // When returning to the app after being idle for hours,
             // proactively validate or refresh the Supabase session before executing queries
@@ -451,15 +581,17 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
 
     fun logout() {
         val currentVendor = (_authUiState.value as? AuthUiState.Authenticated)?.vendor
-        val token = sessionManager.fcmToken
-        if (currentVendor != null && !token.isNullOrEmpty()) {
+            ?: sessionManager.cachedVendor
+        if (currentVendor != null) {
             viewModelScope.launch {
-                repository.deactivateFcmToken(currentVendor.id, token)
+                repository.deactivateFcmToken(currentVendor.id)
             }
         }
         livePollingJob?.cancel()
         repository.logout()
         _authUiState.value = AuthUiState.Unauthenticated
+        _dashboardState.update { it.copy(isOrderAlertsOn = false) }
+        _profileState.update { it.copy(isFcmRegistered = false) }
     }
 
     fun refreshActiveVendorProfile() {
@@ -502,15 +634,18 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
             // Rule 4: Run independent requests in parallel, not one after another
             try {
                 coroutineScope {
+                    val (startUtcIso, endUtcIso) = IstDateUtils.getTodayIstRangeUtcStrings()
                     val ordersDeferred = async { repository.getOrders(vId, limit = 20, offset = 0) }
+                    val todayOrdersDeferred = async { repository.getTodayOrders(vId, startUtcIso, endUtcIso) }
                     val reviewsDeferred = async { repository.getReviews(vId, limit = 20, offset = 0) }
-                    val walletDeferred = async { repository.getWalletTransactions(vId, limit = 20, offset = 0) }
+                    val walletDeferred = async { repository.getVendorWallet() }
 
                     val ordersRes = ordersDeferred.await()
+                    val todayOrdersRes = todayOrdersDeferred.await()
                     val reviewsRes = reviewsDeferred.await()
                     val walletRes = walletDeferred.await()
 
-                    if (ordersRes.code == 401 || reviewsRes.code == 401 || walletRes.code == 401) {
+                    if (ordersRes.code == 401 || reviewsRes.code == 401 || walletRes.code == 401 || todayOrdersRes.code == 401) {
                         handleSessionExpired("Your session expired, please log in again")
                         return@coroutineScope
                     }
@@ -521,34 +656,60 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
                     }
 
                     val orders = (ordersRes as Resource.Success).data
+                    val todayOrders = if (todayOrdersRes is Resource.Success) todayOrdersRes.data else emptyList()
                     val reviews = if (reviewsRes is Resource.Success) reviewsRes.data else emptyList()
                     val avgRating = if (reviews.isNotEmpty()) reviews.map { it.rating }.average() else 0.0
 
-                    val transactions = if (walletRes is Resource.Success) walletRes.data else emptyList()
-                    val balance = transactions.sumOf {
-                        if (it.type.lowercase() in listOf("debit", "withdrawal")) -it.amount else it.amount
+                    // 3.1: loadDashboard fallback: purana balance dikhao agar hai, aur error/retry dikhao, 0.0 nahi
+                    val prevBalance = _dashboardState.value.walletBalance
+                    val prevHasValid = _dashboardState.value.hasValidWalletBalance
+                    val (balance, isWalletError, hasValidWallet) = if (walletRes is Resource.Success) {
+                        Triple(walletRes.data.balance, false, true)
+                    } else {
+                        Triple(prevBalance, true, prevHasValid)
                     }
 
-                    // Calculate Today's stats
-                    val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
-                    val todayOrders = orders.filter { it.createdAt?.startsWith(todayStr) == true }
+                    // 3.2: Calculate Today's stats based on server-side filtered IST orders (without 20-order limit)
                     val ordersTodayCount = todayOrders.size
-                    val earningsTodaySum = todayOrders
-                        .filter { it.status?.lowercase() !in listOf("cancelled", "canceled") }
-                        .sumOf { it.totalAmount }
+                    val deliveredTodayOrders = todayOrders.filter { it.status?.lowercase() == "delivered" }
+                    val deliveredOrdersTodayCount = deliveredTodayOrders.size
+
+                    // Kamai ke liye order ka vendor_amount use karo (subtotal x commission estimate aur hardcoded 25% fallback hatao; vendor_amount na ho to "--" dikhao)
+                    val todayEarningsVendorAmount: BigDecimal? = if (deliveredTodayOrders.isEmpty()) {
+                        BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP)
+                    } else {
+                        val allHaveVendorAmount = deliveredTodayOrders.all { it.vendor_amount != null }
+                        if (allHaveVendorAmount) {
+                            deliveredTodayOrders.fold(BigDecimal.ZERO) { acc, o ->
+                                acc + (CurrencyFormatter.toBigDecimal(o.vendor_amount) ?: BigDecimal.ZERO)
+                            }.setScale(2, RoundingMode.HALF_UP)
+                        } else {
+                            null
+                        }
+                    }
+
+                    val foodSalesTodayDelivered = deliveredTodayOrders.sumOf { it.subtotal ?: it.totalAmount ?: 0.0 }
                     val confirmedOrdersCount = orders.count { it.status?.lowercase() == "confirmed" }
+                    val vendorCommission = (sessionManager.cachedVendor?.commissionPercent ?: 25.0)
 
                     _dashboardState.update {
                         it.copy(
                             ordersTodayCount = ordersTodayCount,
-                            earningsTodaySum = earningsTodaySum,
+                            deliveredOrdersTodayCount = deliveredOrdersTodayCount,
+                            earningsTodaySum = todayEarningsVendorAmount?.toDouble() ?: 0.0,
+                            todayEarningsVendorAmount = todayEarningsVendorAmount,
+                            foodSalesTodayDelivered = foodSalesTodayDelivered,
+                            commissionPercent = vendorCommission,
                             confirmedOrdersCount = confirmedOrdersCount,
                             pendingOrdersCount = 0,
                             averageRating = if (avgRating.isNaN()) 0.0 else avgRating,
                             walletBalance = balance,
+                            hasValidWalletBalance = hasValidWallet,
+                            isWalletBalanceError = isWalletError,
+                            walletErrorMessage = if (isWalletError) "Wallet balance unavailable. Tap to retry." else null,
                             recentOrders = orders.take(10),
                             isLoading = false,
-                            errorMessage = null
+                            errorMessage = if (isWalletError && !hasValidWallet) "Failed to load wallet balance" else null
                         )
                     }
                 }
@@ -1103,15 +1264,19 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
             _earningsState.update { it.copy(isLoading = true, errorMessage = null) }
             try {
                 coroutineScope {
+                    val walletDeferred = async { repository.getVendorWallet() }
                     val txDeferred = async { repository.getWalletTransactions(vId, limit = 20, offset = 0) }
                     val payDeferred = async { repository.getPayouts(vId, limit = 20, offset = 0) }
-                    val withDeferred = async { repository.getWithdrawals(vId, limit = 20, offset = 0) }
+                    val withDeferred = async { repository.getWithdrawals(vId, limit = 50, offset = 0) }
+                    val vendorDeferred = async { repository.fetchVendorProfile() }
 
+                    val walletRes = walletDeferred.await()
                     val txRes = txDeferred.await()
                     val payRes = payDeferred.await()
                     val withRes = withDeferred.await()
+                    val vendorRes = vendorDeferred.await()
 
-                    if (txRes.code == 401 || payRes.code == 401 || withRes.code == 401) {
+                    if (walletRes.code == 401 || txRes.code == 401 || payRes.code == 401 || withRes.code == 401) {
                         handleSessionExpired("Your session expired, please log in again")
                         return@coroutineScope
                     }
@@ -1129,13 +1294,26 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
                         return@coroutineScope
                     }
 
-                    val txs = (txRes as Resource.Success).data
-                    val pays = (payRes as Resource.Success).data
-                    val withs = (withRes as Resource.Success).data
+                    val txs = if (txRes is Resource.Success) txRes.data else _earningsState.value.walletTransactions
+                    val pays = if (payRes is Resource.Success) payRes.data else _earningsState.value.payouts
+                    val withs = if (withRes is Resource.Success) withRes.data else _earningsState.value.withdrawals
 
-                    val balance = txs.sumOf {
-                        if (it.type.lowercase() in listOf("debit", "withdrawal")) -it.amount else it.amount
+                    val inProgressList = withs.filter { it.status.lowercase() in listOf("pending", "approved") }
+                    val inProgressSum = inProgressList.sumOf { it.amount }
+
+                    // 3.1: Fallback 20 transactions sum hatao. Fail hone par purana balance dikhao (agar hai) aur error/retry dikhao
+                    val prevBalance = _earningsState.value.runningBalance
+                    val prevHasValid = _earningsState.value.hasValidWalletBalance
+                    val (balance, isWalletError, hasValidBalance) = if (walletRes is Resource.Success) {
+                        Triple(walletRes.data.balance, false, true)
+                    } else {
+                        Triple(prevBalance, true, prevHasValid)
                     }
+
+                    val available = (balance - inProgressSum).coerceAtLeast(0.0)
+
+                    val vendor = if (vendorRes is Resource.Success) vendorRes.data else (_authUiState.value as? AuthUiState.Authenticated)?.vendor ?: sessionManager.cachedVendor
+                    val commPercent = vendor?.commissionPercent?.takeIf { it > 0.0 } ?: 25.0
 
                     _earningsState.update {
                         it.copy(
@@ -1143,12 +1321,30 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
                             payouts = pays,
                             withdrawals = withs,
                             runningBalance = balance,
+                            hasValidWalletBalance = hasValidBalance,
+                            isWalletBalanceError = isWalletError,
+                            walletErrorMessage = if (isWalletError) "Could not update wallet balance from server" else null,
+                            inProgressWithdrawalsSum = inProgressSum,
+                            availableToWithdraw = available,
+                            commissionPercent = commPercent,
+                            activeWithdrawalInProgress = inProgressList.firstOrNull(),
                             page = 0,
-                            canLoadMoreTransactions = txs.size >= 20,
+                            canLoadMoreTransactions = (txRes as? Resource.Success)?.data?.size?.let { s -> s >= 20 } ?: false,
                             isLoadingMoreTransactions = false,
                             isLoading = false,
-                            errorMessage = null
+                            errorMessage = when {
+                                isWalletError && !hasValidBalance -> "Wallet balance unavailable. Tap to retry."
+                                txRes is Resource.Error -> txRes.message
+                                payRes is Resource.Error -> payRes.message
+                                withRes is Resource.Error -> withRes.message
+                                else -> null
+                            }
                         )
+                    }
+
+                    if (!isWalletError) {
+                        // Keep dashboard balance in sync with total server balance
+                        _dashboardState.update { it.copy(walletBalance = balance, hasValidWalletBalance = true, isWalletBalanceError = false) }
                     }
                 }
             } catch (e: Exception) {
@@ -1190,13 +1386,53 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
     fun requestWithdrawal(amount: Double, note: String?, onComplete: (Boolean, String?) -> Unit) {
         val vendor = (_authUiState.value as? AuthUiState.Authenticated)?.vendor
             ?: sessionManager.cachedVendor ?: return
+        val currentState = _earningsState.value
+
+        if (currentState.isSubmittingWithdrawal) return
+
+        val amountBigDecimal = CurrencyFormatter.toBigDecimal(amount) ?: BigDecimal.ZERO
+        val availableBigDecimal = CurrencyFormatter.toBigDecimal(currentState.availableToWithdraw) ?: BigDecimal.ZERO
+
+        // Only one open request in progress allowed
+        if (currentState.activeWithdrawalInProgress != null) {
+            val msg = "You already have a withdrawal request of ${CurrencyFormatter.format(currentState.activeWithdrawalInProgress.amount)} in progress. Please wait for City Admin to process it before requesting another."
+            _earningsState.update { it.copy(errorMessage = msg) }
+            onComplete(false, msg)
+            return
+        }
+
+        if (amountBigDecimal <= BigDecimal.ZERO) {
+            val msg = "Withdrawal amount must be greater than 0"
+            _earningsState.update { it.copy(errorMessage = msg) }
+            onComplete(false, msg)
+            return
+        }
+
+        if (amountBigDecimal > availableBigDecimal) {
+            val msg = "Withdrawal amount ${CurrencyFormatter.format(amountBigDecimal)} exceeds available balance ${CurrencyFormatter.format(availableBigDecimal)}"
+            _earningsState.update { it.copy(errorMessage = msg) }
+            onComplete(false, msg)
+            return
+        }
+
+        // 3.5: Client UUID request_id for idempotent withdrawal
+        val clientRequestId = UUID.randomUUID().toString()
+
+        // Button submit hote hi synchronously disable ho
+        _earningsState.update { it.copy(isSubmittingWithdrawal = true, errorMessage = null) }
+
         viewModelScope.launch {
-            _earningsState.update { it.copy(isSubmittingWithdrawal = true, errorMessage = null) }
-            when (val res = repository.requestWithdrawal(vendor.id, vendor.cityId, amount, note)) {
+            when (val res = repository.requestWithdrawal(
+                vendorId = vendor.id,
+                cityId = vendor.cityId,
+                amount = amountBigDecimal.toDouble(),
+                note = note,
+                requestId = clientRequestId
+            )) {
                 is Resource.Success -> {
                     _earningsState.update {
                         it.copy(
-                            withdrawals = listOf(res.data) + it.withdrawals,
+                            withdrawals = listOf(res.data) + it.withdrawals.filter { w -> w.id != res.data.id },
                             isSubmittingWithdrawal = false,
                             successMessage = "Withdrawal request submitted for approval"
                         )
@@ -1205,6 +1441,27 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
                     onComplete(true, null)
                 }
                 is Resource.Error -> {
+                    // Timeout/network error recovery: pehle withdrawals dobara fetch karke check karo ki request ban chuki hai ya nahi
+                    val checkRes = repository.getWithdrawals(vendor.id, limit = 5, offset = 0)
+                    if (checkRes is Resource.Success) {
+                        val matchingWithdrawal = checkRes.data.firstOrNull { w ->
+                            (w.requestId != null && w.requestId == clientRequestId) ||
+                            (w.status.lowercase() == "pending" && Math.abs(w.amount - amountBigDecimal.toDouble()) < 0.01)
+                        }
+                        if (matchingWithdrawal != null) {
+                            _earningsState.update {
+                                it.copy(
+                                    withdrawals = checkRes.data,
+                                    isSubmittingWithdrawal = false,
+                                    successMessage = "Withdrawal request submitted for approval"
+                                )
+                            }
+                            loadEarnings(vendor.id)
+                            onComplete(true, null)
+                            return@launch
+                        }
+                    }
+
                     _earningsState.update { it.copy(isSubmittingWithdrawal = false, errorMessage = res.message) }
                     onComplete(false, res.message)
                 }
@@ -1506,63 +1763,182 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    private fun registerClientFcmToken(vendor: Vendor) {
+    private var fcmRegistrationRetryCount = 0
+    private var isFcmRegistering = false
+
+    fun registerClientFcmToken(vendor: Vendor) {
         val email = sessionManager.userEmail ?: "${vendor.id}@sndmart.vendor"
 
-        // Prevent attempting FCM registration on emulators or when Play Services is unavailable
-        if (isEmulatorOrPlayServicesUnavailable()) {
-            android.util.Log.i("VendorViewModel", "Running on emulator/streaming environment or Google Play Services not configured for FCM. Using persistent client device token.")
-            val clientToken = sessionManager.fcmToken ?: "android_fcm_${UUID.randomUUID().toString().replace("-", "").take(16)}"
-            sessionManager.fcmToken = clientToken
-            _profileState.update { it.copy(fcmToken = clientToken) }
-
-            viewModelScope.launch {
-                when (repository.registerFcmToken(vendor.id, email, clientToken)) {
-                    is Resource.Success -> _profileState.update { it.copy(isFcmRegistered = true) }
-                    is Resource.Error -> _profileState.update { it.copy(isFcmRegistered = false) }
-                    Resource.Loading -> {}
-                }
-            }
+        if (isFcmRegistering) {
+            android.util.Log.d("VendorViewModel", "FCM token registration already in progress")
             return
         }
 
-        try {
-            FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
-                val token = try {
-                    if (task.isSuccessful && !task.result.isNullOrBlank()) {
-                        task.result
-                    } else {
-                        android.util.Log.i("VendorViewModel", "FCM token retrieval not available, using device client token: ${task.exception?.message}")
-                        sessionManager.fcmToken ?: "android_fcm_${UUID.randomUUID().toString().replace("-", "").take(16)}"
+        viewModelScope.launch {
+            isFcmRegistering = true
+            try {
+                // Fetch real Firebase token without fake fallback
+                val token = kotlinx.coroutines.suspendCancellableCoroutine<String?> { cont ->
+                    try {
+                        FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
+                            if (task.isSuccessful && !task.result.isNullOrBlank()) {
+                                if (cont.isActive) cont.resume(task.result, null)
+                            } else {
+                                android.util.Log.w("VendorViewModel", "FCM token retrieval failed: ${task.exception?.message}")
+                                if (cont.isActive) cont.resume(null, null)
+                            }
+                        }
+                    } catch (t: Throwable) {
+                        android.util.Log.e("VendorViewModel", "FirebaseMessaging token exception", t)
+                        if (cont.isActive) cont.resume(null, null)
                     }
-                } catch (t: Throwable) {
-                    android.util.Log.i("VendorViewModel", "FCM token retrieval notice: ${t.message}")
-                    sessionManager.fcmToken ?: "android_fcm_${UUID.randomUUID().toString().replace("-", "").take(16)}"
                 }
 
-                sessionManager.fcmToken = token
-                _profileState.update { it.copy(fcmToken = token) }
+                if (!token.isNullOrBlank()) {
+                    sessionManager.fcmToken = token
+                    _profileState.update { it.copy(fcmToken = token) }
 
-                viewModelScope.launch {
-                    when (repository.registerFcmToken(vendor.id, email, token)) {
-                        is Resource.Success -> _profileState.update { it.copy(isFcmRegistered = true) }
-                        is Resource.Error -> _profileState.update { it.copy(isFcmRegistered = false) }
+                    when (val res = repository.registerFcmToken(vendor.id, email, token)) {
+                        is Resource.Success -> {
+                            android.util.Log.i("VendorViewModel", "FCM token registered successfully for vendor ${vendor.id}")
+                            fcmRegistrationRetryCount = 0
+                            _profileState.update { it.copy(isFcmRegistered = true) }
+                            val hasPerm = _dashboardState.value.hasNotificationPermission
+                            _dashboardState.update {
+                                it.copy(
+                                    isOrderAlertsOn = hasPerm,
+                                    orderAlertsOffReason = if (hasPerm) null else "Notification permission denied"
+                                )
+                            }
+                        }
+                        is Resource.Error -> {
+                            android.util.Log.e("VendorViewModel", "Failed to register FCM token with backend: ${res.message}")
+                            _profileState.update { it.copy(isFcmRegistered = false) }
+                            val hasPerm = _dashboardState.value.hasNotificationPermission
+                            val reason = if (!hasPerm) "Notification permission denied" else "Push token not registered on server"
+                            _dashboardState.update {
+                                it.copy(
+                                    isOrderAlertsOn = false,
+                                    orderAlertsOffReason = reason
+                                )
+                            }
+                            retryFcmRegistrationIfNeeded(vendor)
+                        }
                         Resource.Loading -> {}
                     }
+                } else {
+                    android.util.Log.w("VendorViewModel", "No valid FCM token obtained. Order alerts: OFF")
+                    _profileState.update { it.copy(isFcmRegistered = false) }
+                    val hasPerm = _dashboardState.value.hasNotificationPermission
+                    val reason = if (!hasPerm) "Notification permission denied" else "Push token not registered on server"
+                    _dashboardState.update {
+                        it.copy(
+                            isOrderAlertsOn = false,
+                            orderAlertsOffReason = reason
+                        )
+                    }
+                    retryFcmRegistrationIfNeeded(vendor)
                 }
+            } catch (e: Exception) {
+                android.util.Log.e("VendorViewModel", "Exception during FCM registration", e)
+                _profileState.update { it.copy(isFcmRegistered = false) }
+                val hasPerm = _dashboardState.value.hasNotificationPermission
+                val reason = if (!hasPerm) "Notification permission denied" else "Push token not registered on server"
+                _dashboardState.update {
+                    it.copy(
+                        isOrderAlertsOn = false,
+                        orderAlertsOffReason = reason
+                    )
+                }
+                retryFcmRegistrationIfNeeded(vendor)
+            } finally {
+                isFcmRegistering = false
             }
-        } catch (e: Throwable) {
-            android.util.Log.i("VendorViewModel", "FirebaseMessaging notice: ${e.message}")
-            val fallbackToken = sessionManager.fcmToken ?: "android_fcm_${UUID.randomUUID().toString().replace("-", "").take(16)}"
-            sessionManager.fcmToken = fallbackToken
-            _profileState.update { it.copy(fcmToken = fallbackToken) }
+        }
+    }
 
+    private fun retryFcmRegistrationIfNeeded(vendor: Vendor) {
+        if (fcmRegistrationRetryCount < 3) {
+            fcmRegistrationRetryCount++
+            android.util.Log.i("VendorViewModel", "Scheduling FCM registration retry #$fcmRegistrationRetryCount in 30 seconds")
             viewModelScope.launch {
-                when (repository.registerFcmToken(vendor.id, email, fallbackToken)) {
-                    is Resource.Success -> _profileState.update { it.copy(isFcmRegistered = true) }
-                    is Resource.Error -> _profileState.update { it.copy(isFcmRegistered = false) }
-                    Resource.Loading -> {}
+                delay(30_000L)
+                registerClientFcmToken(vendor)
+            }
+        } else {
+            android.util.Log.w("VendorViewModel", "Max FCM registration retries (3) reached. Order alerts remain OFF.")
+        }
+    }
+
+    fun sendTestAlert(onResult: (Boolean, String) -> Unit) {
+        viewModelScope.launch {
+            _dashboardState.update { it.copy(isSendingTestAlert = true) }
+            when (val res = repository.sendTestAlert()) {
+                is Resource.Success -> {
+                    val data = res.data
+                    _dashboardState.update { it.copy(isSendingTestAlert = false) }
+                    if (data.sent) {
+                        onResult(true, "Test sent - you should hear the alarm in a few seconds")
+                    } else {
+                        if (data.reason == "no_device_registered") {
+                            val cachedVendor = sessionManager.cachedVendor
+                            if (cachedVendor != null) {
+                                registerClientFcmToken(cachedVendor)
+                            }
+                            onResult(false, "This phone is not registered for alerts")
+                        } else {
+                            onResult(false, "Test alert not sent: ${data.reason ?: "Unknown reason"}")
+                        }
+                    }
                 }
+                is Resource.Error -> {
+                    _dashboardState.update { it.copy(isSendingTestAlert = false) }
+                    onResult(false, res.message)
+                }
+                Resource.Loading -> {}
+            }
+        }
+    }
+
+    fun updateNotificationPermissionStatus(granted: Boolean) {
+        val isRegistered = _profileState.value.isFcmRegistered
+        val alertsOn = granted && isRegistered
+        val reason = when {
+            !granted -> "Notification permission denied"
+            !isRegistered -> "Push token not registered on server"
+            else -> null
+        }
+        _dashboardState.update {
+            it.copy(
+                hasNotificationPermission = granted,
+                isOrderAlertsOn = alertsOn,
+                orderAlertsOffReason = reason
+            )
+        }
+    }
+
+    fun updateBatteryOptimizationWarning(isIgnoring: Boolean) {
+        _dashboardState.update { it.copy(showBatteryOptimizationWarning = !isIgnoring) }
+    }
+
+    fun dismissAutostartTip() {
+        sessionManager.hasSeenAutostartTip = true
+        _dashboardState.update { it.copy(showAutostartTipDialog = false) }
+    }
+
+    fun checkAndShowAutostartTip() {
+        if (!sessionManager.hasSeenAutostartTip) {
+            val manufacturer = Build.MANUFACTURER.lowercase(Locale.ROOT)
+            val isOemNeedingAutostart = manufacturer.contains("xiaomi") ||
+                    manufacturer.contains("redmi") ||
+                    manufacturer.contains("poco") ||
+                    manufacturer.contains("vivo") ||
+                    manufacturer.contains("oppo") ||
+                    manufacturer.contains("realme") ||
+                    manufacturer.contains("huawei") ||
+                    manufacturer.contains("samsung")
+            if (isOemNeedingAutostart) {
+                _dashboardState.update { it.copy(showAutostartTipDialog = true) }
             }
         }
     }
@@ -1615,7 +1991,7 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
         NotificationHelper.showNewOrderNotification(
             context = getApplication(),
             orderId = sampleOrderId,
-            title = "🛎️ New Order #$sampleOrderNumber (₹${"%.2f".format(sampleAmount)})",
+            title = "🛎️ New Order #$sampleOrderNumber (${CurrencyFormatter.format(sampleAmount)})",
             body = "$sampleCustomer • $sampleItems"
         )
         _inAppOrderAlert.value = "🛎️ New Order - Please Prepare! #$sampleOrderNumber"

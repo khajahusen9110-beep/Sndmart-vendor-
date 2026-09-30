@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.data.model.Category
 import com.example.data.model.Product
+import com.example.util.CurrencyFormatter
 import com.example.ui.components.ConfirmationDialog
 import com.example.ui.components.ProductCardSkeleton
 import com.example.ui.theme.SndmartGreen
@@ -562,7 +563,7 @@ fun MenuScreen(
                                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                                         ) {
                                             Text(
-                                                text = "₹${"%.2f".format(product.price)}",
+                                                text = CurrencyFormatter.format(product.price),
                                                 style = MaterialTheme.typography.titleMedium,
                                                 fontWeight = FontWeight.Bold,
                                                 color = SndmartOrange

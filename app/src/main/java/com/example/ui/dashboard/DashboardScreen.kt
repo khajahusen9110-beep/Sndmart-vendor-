@@ -29,8 +29,7 @@ import com.example.ui.components.StatCard
 import com.example.ui.components.StatusBadge
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.DashboardUiState
-import java.text.NumberFormat
-import java.util.Locale
+import com.example.util.CurrencyFormatter
 
 @Composable
 fun DashboardScreen(
@@ -41,14 +40,13 @@ fun DashboardScreen(
     onNavigateToOrders: (statusFilter: String?) -> Unit,
     onOrderClick: (Order) -> Unit,
     onRefresh: () -> Unit,
+    onSendTestAlert: () -> Unit = {},
+    onFixAlerts: () -> Unit = {},
+    onRequestIgnoreBatteryOptimization: () -> Unit = {},
+    onDismissAutostartTip: () -> Unit = {},
+    onOpenAppInfo: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    val currencyFormatter = remember {
-        NumberFormat.getCurrencyInstance(Locale("en", "IN")).apply {
-            maximumFractionDigits = 2
-        }
-    }
-
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
@@ -148,6 +146,169 @@ fun DashboardScreen(
             }
         }
 
+        // 1.5. Order Alerts Status & Test Alert Card (Requirement A7 & A8)
+        item {
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = if (state.isOrderAlertsOn) PolishEmeraldLight.copy(alpha = 0.5f) else PolishRoseLight.copy(alpha = 0.6f),
+                border = BorderStroke(
+                    1.dp,
+                    if (state.isOrderAlertsOn) PolishEmeraldDark.copy(alpha = 0.25f) else PolishRose.copy(alpha = 0.35f)
+                ),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(CircleShape)
+                                    .background(if (state.isOrderAlertsOn) PolishEmerald else PolishRose),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = if (state.isOrderAlertsOn) Icons.Default.NotificationsActive else Icons.Default.NotificationsOff,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            Column {
+                                Text(
+                                    text = if (state.isOrderAlertsOn) "Order alerts: ON" else "Order alerts: OFF",
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (state.isOrderAlertsOn) PolishEmeraldDark else PolishRoseDark
+                                )
+                                Text(
+                                    text = if (state.isOrderAlertsOn) {
+                                        "10-second alarm active for new orders"
+                                    } else {
+                                        state.orderAlertsOffReason ?: "Push notifications disabled"
+                                    },
+                                    fontSize = 12.sp,
+                                    color = Slate600
+                                )
+                            }
+                        }
+
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            if (!state.isOrderAlertsOn) {
+                                Button(
+                                    onClick = onFixAlerts,
+                                    shape = RoundedCornerShape(12.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = PolishRoseDark,
+                                        contentColor = Color.White
+                                    ),
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                                ) {
+                                    Text("Fix", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+
+                            Button(
+                                onClick = onSendTestAlert,
+                                enabled = !state.isSendingTestAlert,
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (state.isOrderAlertsOn) PolishEmeraldDark else Slate800,
+                                    contentColor = Color.White
+                                ),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                            ) {
+                                if (state.isSendingTestAlert) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(14.dp),
+                                        color = Color.White,
+                                        strokeWidth = 2.dp
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Sending...", fontSize = 12.sp)
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Default.VolumeUp,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Test alert", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+
+                    // Battery optimization prompt (Requirement A8)
+                    if (state.showBatteryOptimizationWarning) {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = PolishAmberLight.copy(alpha = 0.7f),
+                            border = BorderStroke(1.dp, PolishAmberDark.copy(alpha = 0.3f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.BatteryAlert,
+                                        contentDescription = null,
+                                        tint = PolishAmberDark,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Text(
+                                        text = "Allow background alerts",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.sp,
+                                        color = PolishAmberDark
+                                    )
+                                }
+                                Text(
+                                    text = "To ensure the 10-second new order alarm rings when the screen is locked or app is closed, battery optimization must be turned off.",
+                                    fontSize = 11.5.sp,
+                                    color = Slate700,
+                                    lineHeight = 15.sp
+                                )
+                                Button(
+                                    onClick = onRequestIgnoreBatteryOptimization,
+                                    shape = RoundedCornerShape(8.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = PolishAmberDark,
+                                        contentColor = Color.White
+                                    ),
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                    modifier = Modifier.align(Alignment.End)
+                                ) {
+                                    Text("Turn off optimization", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // 2. Hero Wallet Card (Deep Spruce #006B5E)
         item {
             Surface(
@@ -176,11 +337,38 @@ fun DashboardScreen(
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                text = "₹${"%.2f".format(state.walletBalance)}",
+                                text = if (state.hasValidWalletBalance || !state.isWalletBalanceError) {
+                                    CurrencyFormatter.format(state.walletBalance)
+                                } else {
+                                    "--"
+                                },
                                 fontSize = 30.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White
                             )
+                            if (state.isWalletBalanceError) {
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .clickable { onRefresh() }
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Refresh,
+                                        contentDescription = "Retry",
+                                        tint = Color.White.copy(alpha = 0.9f),
+                                        modifier = Modifier.size(12.dp)
+                                    )
+                                    Text(
+                                        text = if (state.hasValidWalletBalance) "Cached • Tap to retry" else "Balance unavailable • Tap to retry",
+                                        fontSize = 11.sp,
+                                        color = Color.White.copy(alpha = 0.9f),
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                            }
                         }
 
                         Box(
@@ -236,10 +424,18 @@ fun DashboardScreen(
                         onClick = { onNavigateToOrders(null) }
                     )
                     StatCard(
-                        title = "Earnings",
-                        value = "₹${"%.0f".format(state.earningsTodaySum)}",
-                        subValue = "Settled today",
-                        subValueColor = Slate400,
+                        title = "Today's Earnings",
+                        value = if (state.todayEarningsVendorAmount != null) {
+                            CurrencyFormatter.format(state.todayEarningsVendorAmount)
+                        } else {
+                            "--"
+                        },
+                        subValue = if (state.deliveredOrdersTodayCount > 0) {
+                            "${state.deliveredOrdersTodayCount} delivered orders"
+                        } else {
+                            "No delivered orders yet"
+                        },
+                        subValueColor = if (state.todayEarningsVendorAmount != null && state.deliveredOrdersTodayCount > 0) PolishEmeraldDark else Slate400,
                         modifier = Modifier.weight(1f),
                         onClick = { onNavigateToEarnings() }
                     )
@@ -376,7 +572,7 @@ fun DashboardScreen(
                                     color = Slate900
                                 )
                                 Text(
-                                    text = "${order.orderItems?.size ?: 1} Items • ₹${"%.2f".format(order.totalAmount)}",
+                                    text = "${order.orderItems?.size ?: 1} Items • ${CurrencyFormatter.format(order.totalAmount)}",
                                     fontSize = 12.sp,
                                     color = Slate500
                                 )
@@ -388,6 +584,56 @@ fun DashboardScreen(
                 }
             }
         }
+    }
+
+    // One-time Autostart & Background Protection Tip for OEM phones (Xiaomi, Vivo, Oppo, Realme, Samsung)
+    if (state.showAutostartTipDialog) {
+        val oemName = android.os.Build.MANUFACTURER.replaceFirstChar { it.uppercase() }
+        AlertDialog(
+            onDismissRequest = onDismissAutostartTip,
+            icon = {
+                Icon(
+                    imageVector = Icons.Default.Security,
+                    contentDescription = null,
+                    tint = PolishAmberDark,
+                    modifier = Modifier.size(32.dp)
+                )
+            },
+            title = {
+                Text(
+                    text = "Background Order Alerts",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 17.sp,
+                    color = Slate900
+                )
+            },
+            text = {
+                Text(
+                    text = "On $oemName phones, please enable 'Auto-start' and set Battery to 'No restrictions' in App Info so you never miss new customer order alarms when the phone is locked or app is closed.",
+                    fontSize = 13.5.sp,
+                    lineHeight = 19.sp,
+                    color = Slate700
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onDismissAutostartTip()
+                        onOpenAppInfo()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = SprucePrimary),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text("Open App Info", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = onDismissAutostartTip) {
+                    Text("Got it", color = Slate600)
+                }
+            },
+            shape = RoundedCornerShape(20.dp)
+        )
     }
 }
 

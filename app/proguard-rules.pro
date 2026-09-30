@@ -1,21 +1,47 @@
-# Add project specific ProGuard rules here.
-# You can control the set of applied configuration files using the
-# proguardFiles setting in build.gradle.
-#
-# For more details, see
-#   http://developer.android.com/guide/developing/tools/proguard.html
+# ProGuard & R8 Configuration for Vendor App Release
 
-# If your project uses WebView with JS, uncomment the following
-# and specify the fully qualified class name to the JavaScript interface
-# class:
-#-keepclassmembers class fqcn.of.javascript.interface.for.webview {
-#   public *;
-#}
+-keepattributes SourceFile,LineNumberTable
+-keepattributes *Annotation*,Signature,InnerClasses,EnclosingMethod
 
-# Uncomment this to preserve the line number information for
-# debugging stack traces.
-#-keepattributes SourceFile,LineNumberTable
+# Kotlin Reflection & Coroutines
+-keep class kotlin.Metadata { *; }
+-keepclassmembers class kotlinx.coroutines.** { *; }
 
-# If you keep the line number information, uncomment this to
-# hide the original source file name.
-#-renamesourcefileattribute SourceFile
+# Moshi Codegen & Serialization
+-keepclassmembers class * {
+    @com.squareup.moshi.Json <fields>;
+}
+-keep @com.squareup.moshi.JsonClass class * { *; }
+-keep class *JsonAdapter { *; }
+-keep class com.squareup.moshi.** { *; }
+
+# App Models (Supabase tables and RPCs)
+-keep class com.example.data.model.** { *; }
+-keepclassmembers class com.example.data.model.** { *; }
+
+# Retrofit & OkHttp
+-keepclassmembers class * {
+    @retrofit2.http.* <methods>;
+}
+-keep class retrofit2.** { *; }
+-keep interface com.example.data.network.SupabaseApi { *; }
+-keep class com.example.data.network.** { *; }
+-keep class okhttp3.** { *; }
+
+# Firebase Messaging & Push Services
+-keep class com.google.firebase.messaging.** { *; }
+-keep class com.example.service.VendorFirebaseMessagingService { *; }
+-keep class com.example.util.NotificationHelper { *; }
+-keep class com.example.util.SoundAlertManager { *; }
+-keep class com.example.util.OrderEventBus { *; }
+
+# ViewModels and UI States
+-keep class com.example.ui.viewmodel.** { *; }
+-keepclassmembers class com.example.ui.viewmodel.** { *; }
+
+# Enum preservation
+-keepclassmembers enum * {
+    public static **[] values();
+    public static ** valueOf(java.lang.String);
+}
+

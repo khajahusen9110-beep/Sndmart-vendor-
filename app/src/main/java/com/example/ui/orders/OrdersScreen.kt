@@ -26,6 +26,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.Order
+import com.example.util.CurrencyFormatter
 import com.example.ui.components.OrderCardSkeleton
 import com.example.ui.components.StatusBadge
 import com.example.ui.theme.*
@@ -336,6 +337,11 @@ fun OrdersScreen(
                                 StatusBadge(status = order.status ?: "pending")
                             }
 
+                            val foodSubtotal = order.subtotal
+                                ?: order.orderItems?.sumOf { it.totalPrice.takeIf { p -> p > 0 } ?: (it.unitPrice * (it.quantity ?: 1.0)) }
+                                ?: order.totalAmount
+                            val hasFees = (order.deliveryFee ?: 0.0) > 0 || (order.handlingFee ?: 0.0) > 0 || foodSubtotal < order.totalAmount
+
                             // Customer & Price
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -360,12 +366,48 @@ fun OrdersScreen(
                                     )
                                 }
 
-                                Text(
-                                    text = "₹${"%.2f".format(order.totalAmount)}",
-                                    fontSize = 18.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = PolishEmeraldDark
-                                )
+                                Column(horizontalAlignment = Alignment.End) {
+                                    Text(
+                                        text = CurrencyFormatter.format(foodSubtotal),
+                                        fontSize = 18.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = PolishEmeraldDark
+                                    )
+                                    Text(
+                                        text = if (hasFees) "Food (Total ${CurrencyFormatter.format(order.totalAmount)})" else "Food Subtotal",
+                                        fontSize = 10.5.sp,
+                                        color = Slate500
+                                    )
+                                }
+                            }
+
+                            // If order is delivered, show credit banner
+                            if (order.status?.lowercase() == "delivered") {
+                                Surface(
+                                    color = PolishEmeraldLight.copy(alpha = 0.5f),
+                                    shape = RoundedCornerShape(8.dp),
+                                    border = BorderStroke(1.dp, PolishEmeraldDark.copy(alpha = 0.2f)),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.CheckCircle,
+                                            contentDescription = null,
+                                            tint = PolishEmeraldDark,
+                                            modifier = Modifier.size(15.dp)
+                                        )
+                                        Text(
+                                            text = "Credited to wallet: ${CurrencyFormatter.format(foodSubtotal)}",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 12.sp,
+                                            color = PolishEmeraldDark
+                                        )
+                                    }
+                                }
                             }
 
                             // Order items summary preview
@@ -649,7 +691,7 @@ fun OrdersScreen(
                                 )
                                 val itemTotal = item.totalPrice.takeIf { it > 0 } ?: (item.unitPrice * (item.quantity ?: 1.0))
                                 Text(
-                                    text = "₹${"%.2f".format(itemTotal)}",
+                                    text = CurrencyFormatter.format(itemTotal),
                                     fontWeight = FontWeight.Bold,
                                     color = Slate900
                                 )
@@ -657,15 +699,116 @@ fun OrdersScreen(
                         }
                     }
 
-                    // Total
+                    // Financial Breakdown
+                    val detailFoodSubtotal = order.subtotal
+                        ?: detailItems?.sumOf { it.totalPrice.takeIf { p -> p > 0 } ?: (it.unitPrice * (it.quantity ?: 1.0)) }
+                        ?: order.totalAmount
+                    val deliveryFee = order.deliveryFee ?: 0.0
+                    val handlingFee = order.handlingFee ?: 0.0
+
                     item {
                         HorizontalDivider(color = PolishBorderLight)
-                        Row(
+                        Column(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Text("Total Order Amount:", fontWeight = FontWeight.Bold, color = Slate900)
-                            Text("₹${"%.2f".format(order.totalAmount)}", fontWeight = FontWeight.Bold, color = PolishEmeraldDark, fontSize = 16.sp)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("Food Subtotal (Hotel):", fontSize = 13.sp, color = Slate700, fontWeight = FontWeight.SemiBold)
+                                Text(CurrencyFormatter.format(detailFoodSubtotal), fontSize = 13.5.sp, fontWeight = FontWeight.Bold, color = PolishEmeraldDark)
+                            }
+                            if (deliveryFee > 0) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text("Delivery Fee (Partner):", fontSize = 12.sp, color = Slate500)
+                                    Text(CurrencyFormatter.format(deliveryFee), fontSize = 12.sp, color = Slate600)
+                                }
+                            }
+                            if (handlingFee > 0) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text("Handling / Platform Fee:", fontSize = 12.sp, color = Slate500)
+                                    Text(CurrencyFormatter.format(handlingFee), fontSize = 12.sp, color = Slate600)
+                                }
+                            }
+                            HorizontalDivider(color = PolishBorderLight.copy(alpha = 0.6f), modifier = Modifier.padding(vertical = 2.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("Total Paid by Customer:", fontWeight = FontWeight.Bold, color = Slate900)
+                                Text(CurrencyFormatter.format(order.totalAmount), fontWeight = FontWeight.Bold, color = Slate900, fontSize = 15.sp)
+                            }
+
+                            // Notice for Hotel earnings
+                            if (order.status?.lowercase() == "delivered") {
+                                Surface(
+                                    color = PolishEmeraldLight.copy(alpha = 0.5f),
+                                    shape = RoundedCornerShape(10.dp),
+                                    border = BorderStroke(1.dp, PolishEmeraldDark.copy(alpha = 0.25f)),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(top = 4.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(10.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.CheckCircle,
+                                            contentDescription = null,
+                                            tint = PolishEmeraldDark,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Column {
+                                            Text(
+                                                text = "Credited to wallet: ${CurrencyFormatter.format(detailFoodSubtotal)}",
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 12.5.sp,
+                                                color = PolishEmeraldDark
+                                            )
+                                            Text(
+                                                text = "Food amount credited to hotel wallet upon delivery.",
+                                                fontSize = 11.sp,
+                                                color = PolishEmeraldDark.copy(alpha = 0.85f)
+                                            )
+                                        }
+                                    }
+                                }
+                            } else {
+                                Surface(
+                                    color = SpruceContainerLight.copy(alpha = 0.6f),
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(top = 4.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(10.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Info,
+                                            contentDescription = null,
+                                            tint = SprucePrimary,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Text(
+                                            text = "Hotel Earning: ${CurrencyFormatter.format(detailFoodSubtotal)} will be credited to wallet when delivered.",
+                                            fontSize = 11.5.sp,
+                                            color = SpruceOnContainer
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
 

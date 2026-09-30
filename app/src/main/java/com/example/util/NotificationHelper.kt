@@ -19,21 +19,38 @@ object NotificationHelper {
     const val CHANNEL_ID_NEW_ORDERS = "new_order_alerts_v2"
     const val CHANNEL_NAME_NEW_ORDERS = "New Order Alerts"
 
+    const val CHANNEL_ID_GENERAL_UPDATES = "general_updates"
+    const val CHANNEL_NAME_GENERAL_UPDATES = "General Updates"
+
     fun createNotificationChannels(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
+            val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+                ?: return
+
+            // 1. New Orders Channel: High importance, silent sound (so OrderAlarmService plays 10s urgent alarm)
+            val newOrdersChannel = NotificationChannel(
                 CHANNEL_ID_NEW_ORDERS,
                 CHANNEL_NAME_NEW_ORDERS,
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
-                description = "Alert notifications for new customer orders"
+                description = "Urgent alert ringtone notifications for incoming customer orders"
                 enableVibration(true)
                 vibrationPattern = longArrayOf(0, 500, 200, 500, 200, 500, 200, 1000)
-                setSound(null, null) // Silent channel so custom 10s MediaPlayer sound plays without overlap
+                setSound(null, null) // Silent channel so custom 10s MediaPlayer alarm plays cleanly
             }
 
-            val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
-            notificationManager?.createNotificationChannel(channel)
+            // 2. General Updates Channel: Standard notifications (rejected, cancelled, withdrawals, broadcasts) with default short sound
+            val generalChannel = NotificationChannel(
+                CHANNEL_ID_GENERAL_UPDATES,
+                CHANNEL_NAME_GENERAL_UPDATES,
+                NotificationManager.IMPORTANCE_DEFAULT
+            ).apply {
+                description = "General notifications for order status changes, withdrawals, and updates"
+                enableVibration(true)
+            }
+
+            notificationManager.createNotificationChannel(newOrdersChannel)
+            notificationManager.createNotificationChannel(generalChannel)
         }
     }
 
@@ -58,6 +75,44 @@ object NotificationHelper {
         }
     }
 
+    fun showGeneralNotification(
+        context: Context,
+        notificationId: Int,
+        title: String,
+        body: String,
+        targetTab: String = "orders"
+    ) {
+        createNotificationChannels(context)
+
+        val intent = Intent(context, MainActivity::class.java).apply {
+            putExtra("NAVIGATE_TO", targetTab)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            notificationId,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val builder = NotificationCompat.Builder(context, CHANNEL_ID_GENERAL_UPDATES)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+
+        try {
+            val notificationManager = NotificationManagerCompat.from(context)
+            notificationManager.notify(notificationId, builder.build())
+        } catch (e: SecurityException) {
+            Log.w("NotificationHelper", "Missing POST_NOTIFICATIONS permission: ${e.message}")
+        } catch (e: Exception) {
+            Log.e("NotificationHelper", "Failed to post general notification", e)
+        }
+    }
+
     fun showNewOrderNotification(
         context: Context,
         orderId: String,
@@ -71,7 +126,7 @@ object NotificationHelper {
             putExtra("order_id", orderId)
             putExtra("NAVIGATE_TO", "orders")
             putExtra("SELECTED_ORDER_ID", orderId)
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         }
         val pendingIntent = PendingIntent.getActivity(
             context,

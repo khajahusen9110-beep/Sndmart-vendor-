@@ -14,6 +14,7 @@ import com.example.R
 import com.example.data.local.SessionManager
 import com.example.data.network.SupabaseClient
 import com.example.data.repository.VendorRepository
+import com.example.util.NotificationHelper
 import com.example.util.OrderEventBus
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
@@ -33,8 +34,9 @@ class VendorFirebaseMessagingService : FirebaseMessagingService() {
         sessionManager.fcmToken = token
 
         // If vendor is logged in, upsert the refreshed token into vendor_fcm_tokens table
+        // Use ONLY cachedVendor?.id as vendor_id (remove sessionManager.userId fallback which is the login ID)
         val cachedVendor = sessionManager.cachedVendor
-        val vendorId = cachedVendor?.id ?: sessionManager.userId
+        val vendorId = cachedVendor?.id
         val vendorEmail = sessionManager.userEmail ?: cachedVendor?.ownerName ?: "vendor@sndmart.com"
 
         if (!vendorId.isNullOrEmpty()) {
@@ -48,6 +50,8 @@ class VendorFirebaseMessagingService : FirebaseMessagingService() {
                     Log.e("VendorFCMService", "Failed to sync refreshed FCM token", e)
                 }
             }
+        } else {
+            Log.d("VendorFCMService", "FCM token saved locally; will sync to Supabase once vendor logs in")
         }
     }
 
@@ -56,69 +60,22 @@ class VendorFirebaseMessagingService : FirebaseMessagingService() {
         Log.d("VendorFCMService", "FCM Message received from: ${message.from}, data: ${message.data}")
 
         val orderId = message.data["orderId"] ?: message.data["order_id"] ?: message.data["id"] ?: "order_${System.currentTimeMillis()}"
-        val title = message.data["title"] ?: message.notification?.title ?: "New Order"
-        val body = message.data["message"] ?: message.data["body"] ?: message.notification?.body ?: "You have a new order"
+        val title = message.data["title"] ?: message.notification?.title ?: "Sndmart Order Alert"
+        val body = message.data["message"] ?: message.data["body"] ?: message.notification?.body ?: "You have a new update"
 
-        // Notify active screens (like OrdersScreen) to immediately reload data
-        OrderEventBus.notifyNewOrder(orderId)
+        val status = message.data["status"]?.lowercase()
+        val type = message.data["type"]?.lowercase()
+        val isNewOrder = type == "new_order" || type == "test_alert" || status in listOf("confirmed", "pending")
 
-        val intent = Intent(this, MainActivity::class.java).apply {
-            putExtra("order_id", orderId)
-            putExtra("NAVIGATE_TO", "orders")
-            putExtra("SELECTED_ORDER_ID", orderId)
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-        }
-        val pendingIntent = PendingIntent.getActivity(
-            this, orderId.hashCode(), intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
+        if (isNewOrder) {
+            // Notify active screens (like OrdersScreen) to immediately reload data
+            OrderEventBus.notifyNewOrder(orderId)
 
-        val channelId = "new_order_alerts_v2"
-        val channel = NotificationChannel(
-            channelId, "New Order Alerts", NotificationManager.IMPORTANCE_HIGH
-        ).apply {
-            enableVibration(true)
-            vibrationPattern = longArrayOf(0, 500, 200, 500, 200, 500, 200, 1000)
-            setSound(null, null) // Silent channel so custom 10s MediaPlayer sound plays without overlap
-        }
-        val notificationManager = getSystemService(NotificationManager::class.java)
-        notificationManager.createNotificationChannel(channel)
-
-        val notification = NotificationCompat.Builder(this, channelId)
-            .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle(title)
-            .setContentText(body)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setCategory(NotificationCompat.CATEGORY_ALARM)
-            .setContentIntent(pendingIntent)
-            .setAutoCancel(true)
-            .setSound(null)
-            .build()
-
-        notificationManager.notify(orderId.hashCode(), notification)
-
-        // Play 10-second continuous urgent alert sound using MediaPlayer
-        playLongAlertSound(this)
-    }
-
-    private fun playLongAlertSound(context: Context) {
-        try {
-            val mediaPlayer = MediaPlayer()
-            val afd = context.resources.openRawResourceFd(R.raw.order_alert_sound)
-            mediaPlayer.setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
-            afd.close()
-            mediaPlayer.setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_ALARM)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                    .build()
-            )
-            mediaPlayer.isLooping = false
-            mediaPlayer.setOnCompletionListener { it.release() }
-            mediaPlayer.prepare()
-            mediaPlayer.start()
-        } catch (e: Exception) {
-            Log.e("VendorFcm", "Failed to play alert sound", e)
+            // Play 10-second continuous urgent alert sound using foreground service (survives app backgrounding & screen lock)
+            OrderAlarmService.startAlarm(this, orderId, title, body)
+        } else {
+            // All other pushes (Order Rejected, Order Cancelled, Order Update, withdrawals, broadcasts) -> normal notification on general_updates channel with default short sound, no alarm
+            NotificationHelper.showGeneralNotification(this, orderId.hashCode(), title, body)
         }
     }
 }
