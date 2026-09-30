@@ -56,10 +56,10 @@ val SAMPLE_FOOD_IMAGES = listOf(
     "https://images.unsplash.com/photo-1550547660-d9450f859349?w=400" to "Fast Food & Snacks"
 )
 
-@OptIn(ExperimentalMaterial3Api::class)
 /** 24-hour time of day such as 7:00, 07:00 or 22:30:00. */
 private val TIME_OF_DAY_REGEX = Regex("^([01]?\\d|2[0-3]):[0-5]\\d(:[0-5]\\d)?$")
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MenuScreen(
     state: MenuUiState,
