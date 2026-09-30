@@ -56,18 +56,6 @@ data class City(
 )
 
 @JsonClass(generateAdapter = true)
-data class SignedUrlRequest(
-    val expiresIn: Int = 3600
-)
-
-@JsonClass(generateAdapter = true)
-data class SignedUrlResponse(
-    @Json(name = "signedURL") val signedURL: String? = null,
-    val error: String? = null,
-    val message: String? = null
-)
-
-@JsonClass(generateAdapter = true)
 data class StorageUploadResponse(
     @Json(name = "Key") val key: String? = null,
     @Json(name = "Id") val id: String? = null,
@@ -135,7 +123,7 @@ data class Category(
     val name: String = "",
     @Json(name = "name_kn") val nameKn: String? = null,
     val slug: String? = null,
-    @Json(name = "image_url") val imageUrl: String = "",
+    @Json(name = "image_url") val imageUrl: String? = null,
     @Json(name = "sort_order") val sortOrder: Int? = 0,
     @Json(name = "is_active") val isActive: Boolean = true,
     @Json(name = "vendor_type") val vendorType: String? = "hotel",
@@ -178,8 +166,6 @@ data class Customer(
     val fullName: String? get() = full_name
 }
 
-typealias OrderCustomer = Customer
-
 @JsonClass(generateAdapter = true)
 data class Address(
     val address_line: String? = null,
@@ -190,8 +176,6 @@ data class Address(
     val addressLine: String? get() = address_line
     val recipientName: String? get() = recipient_name
 }
-
-typealias OrderAddress = Address
 
 @JsonClass(generateAdapter = true)
 data class OrderItem(
@@ -237,7 +221,6 @@ data class Order(
     val delivery_partner_id: String? = null,
     val address_id: String? = null,
     val slot_id: String? = null,
-    val cancellation_reason: String? = null,
     val placed_at: String? = null,
     val city_id: String? = null
 ) {
@@ -250,7 +233,6 @@ data class Order(
     val vendorAmount: Double? get() = vendor_amount
     val paymentStatus: String? get() = payment_status
     val paymentMethod: String? get() = payment_method
-    val cancellationReason: String? get() = cancellation_reason
     val createdAt: String? get() = created_at
     val orderItems: List<OrderItem>? get() = order_items
 
@@ -354,7 +336,6 @@ data class Withdrawal(
     @Json(name = "rejection_reason") val rejectionReason: String? = null,
     @Json(name = "commission_amount") val commissionAmount: Double? = null,
     @Json(name = "net_payable_amount") val netPayableAmount: Double? = null,
-    @Json(name = "request_id") val requestId: String? = null,
     @Json(name = "paid_at") val paidAt: String? = null,
     @Json(name = "created_at") val createdAt: String? = null,
     @Json(name = "updated_at") val updatedAt: String? = null
@@ -405,7 +386,7 @@ data class FcmTokenRegistration(
     val id: String? = null,
     @Json(name = "vendor_id") val vendorId: String,
     @Json(name = "vendor_type") val vendorType: String = "hotel",
-    @Json(name = "vendor_email") val vendorEmail: String,
+    @Json(name = "vendor_email") val vendorEmail: String? = null,
     @Json(name = "fcm_token") val fcmToken: String,
     val platform: String = "android",
     @Json(name = "is_active") val isActive: Boolean = true,

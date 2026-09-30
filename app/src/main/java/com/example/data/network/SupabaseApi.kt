@@ -95,15 +95,16 @@ interface SupabaseApi {
     ): Response<List<Category>>
 
     @DELETE("rest/v1/categories")
+    @Headers("Prefer: return=representation")
     suspend fun deleteCategory(
         @Query("id") categoryIdFilter: String
-    ): Response<Unit>
+    ): Response<List<Category>>
 
     // 4. Products table
     @GET("rest/v1/products")
     suspend fun getProducts(
         @Query("vendor_id") vendorIdFilter: String,
-        @Query("select") select: String = "id,vendor_id,category_id,name,description,price,image_url,is_active,stock_qty,is_available,created_at",
+        @Query("select") select: String = "id,vendor_id,category_id,name,description,price,image_url,is_active,stock_qty,is_available,available_from,available_until,created_at",
         @Query("order") order: String = "created_at.desc",
         @Query("limit") limit: Int? = 30,
         @Query("offset") offset: Int? = 0
@@ -123,9 +124,10 @@ interface SupabaseApi {
     ): Response<List<Product>>
 
     @DELETE("rest/v1/products")
+    @Headers("Prefer: return=representation")
     suspend fun deleteProduct(
         @Query("id") productIdFilter: String
-    ): Response<Unit>
+    ): Response<List<Product>>
 
     // 5. Orders table (with nested order_items and customer address)
     @GET("rest/v1/orders")
@@ -143,21 +145,17 @@ interface SupabaseApi {
         @Query("vendor_id") vendorIdFilter: String,
         @Query("created_at") createdAtGte: String,
         @Query("created_at") createdAtLt: String,
+        @Query("status") statusFilter: String = "in.(confirmed,preparing,ready,out_for_delivery,delivered,cancelled,rejected)",
         @Query("select") select: String = "id,order_number,status,subtotal,discount_amount,delivery_fee,handling_fee,total_amount,commission_amount,vendor_amount,notes,payment_status,payment_method,created_at",
         @Query("order") order: String = "created_at.desc,id.desc",
         @Query("limit") limit: Int? = 1000
-    ): Response<List<Order>>
-
-    @GET("rest/v1/orders")
-    suspend fun getOrderById(
-        @Query("id") idFilter: String,
-        @Query("select") select: String = "*,order_items(*),address:customer_addresses!orders_address_id_fkey(address_line,landmark,recipient_name,phone)"
     ): Response<List<Order>>
 
     @PATCH("rest/v1/orders")
     @Headers("Prefer: return=representation")
     suspend fun updateOrderStatus(
         @Query("id") orderIdFilter: String,
+        @Query("status") currentStatusFilter: String?,
         @Body updates: Map<String, @JvmSuppressWildcards Any?>
     ): Response<List<Order>>
 
@@ -167,12 +165,6 @@ interface SupabaseApi {
         @Query("order_id") orderIdFilter: String,
         @Query("select") select: String = "status,created_at",
         @Query("order") order: String = "created_at.asc"
-    ): Response<List<OrderStatusHistory>>
-
-    @POST("rest/v1/order_status_history")
-    @Headers("Prefer: return=representation")
-    suspend fun insertOrderStatusHistory(
-        @Body history: Map<String, @JvmSuppressWildcards Any?>
     ): Response<List<OrderStatusHistory>>
 
     // 7. Wallet Transactions
@@ -251,13 +243,6 @@ interface SupabaseApi {
     ): Response<Unit>
 
     // 12. FCM Tokens registration
-    @GET("rest/v1/vendor_fcm_tokens")
-    suspend fun getFcmTokens(
-        @Query("vendor_id") vendorIdFilter: String,
-        @Query("fcm_token") fcmTokenFilter: String,
-        @Query("select") select: String = "*"
-    ): Response<List<FcmTokenRegistration>>
-
     @POST("rest/v1/vendor_fcm_tokens")
     @Headers("Prefer: return=representation,resolution=merge-duplicates")
     suspend fun registerFcmToken(
@@ -267,17 +252,10 @@ interface SupabaseApi {
 
     @PATCH("rest/v1/vendor_fcm_tokens")
     @Headers("Prefer: return=representation")
-    suspend fun updateFcmToken(
-        @Query("vendor_id") vendorIdFilter: String,
-        @Query("fcm_token") fcmTokenFilter: String,
-        @Body updates: Map<String, @JvmSuppressWildcards Any?>
-    ): Response<List<FcmTokenRegistration>>
-
-    @PATCH("rest/v1/vendor_fcm_tokens")
     suspend fun deactivateVendorFcmTokens(
         @Query("vendor_id") vendorIdFilter: String,
         @Body updates: Map<String, @JvmSuppressWildcards Any?>
-    ): Response<Unit>
+    ): Response<List<FcmTokenRegistration>>
 
     @POST("rest/v1/rpc/vendor_send_test_alert")
     suspend fun vendorSendTestAlert(
@@ -301,12 +279,6 @@ interface SupabaseApi {
         @Header("Content-Type") contentType: String = "image/jpeg",
         @Header("x-upsert") upsert: String = "true"
     ): Response<StorageUploadResponse>
-
-    @POST("storage/v1/object/sign/vendor-kyc-documents/{path}")
-    suspend fun createSignedUrl(
-        @Path(value = "path", encoded = true) path: String,
-        @Body request: SignedUrlRequest
-    ): Response<SignedUrlResponse>
 
     // 14. App Versions & Maintenance Mode
     @GET("rest/v1/app_versions")

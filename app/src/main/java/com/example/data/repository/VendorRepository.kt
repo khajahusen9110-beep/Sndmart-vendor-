@@ -413,6 +413,8 @@ class VendorRepository(
                 val item = response.body()?.firstOrNull()
                 if (item != null) Resource.Success(item)
                 else Resource.Error("Category created but no record returned")
+            } else if (response.code() == 409) {
+                Resource.Error("A category named \"$cleanName\" already exists in your menu.", 409)
             } else {
                 Resource.Error(extractErrorMessage(response, "Failed to add category"), response.code())
             }
@@ -437,7 +439,9 @@ class VendorRepository(
                 sessionManager.cachedVendor?.id?.let { cachedCategories.remove(it) }
                 val item = response.body()?.firstOrNull()
                 if (item != null) Resource.Success(item)
-                else Resource.Success(Category(id = categoryId, name = cleanName, imageUrl = cleanImageUrl, slug = slug, vendorType = "hotel"))
+                else Resource.Error("Category was not updated. Please refresh and try again.")
+            } else if (response.code() == 409) {
+                Resource.Error("A category named \"$cleanName\" already exists in your menu.", 409)
             } else {
                 Resource.Error(extractErrorMessage(response, "Failed to update category"), response.code())
             }
@@ -451,7 +455,11 @@ class VendorRepository(
             val response = api.deleteCategory("eq.$categoryId")
             if (response.isSuccessful) {
                 sessionManager.cachedVendor?.id?.let { cachedCategories.remove(it) }
-                Resource.Success(Unit)
+                if (response.body().isNullOrEmpty()) {
+                    Resource.Error("Category was not deleted. Please refresh and try again.")
+                } else {
+                    Resource.Success(Unit)
+                }
             } else {
                 Resource.Error(extractErrorMessage(response, "Failed to delete category"), response.code())
             }
@@ -529,7 +537,7 @@ class VendorRepository(
             if (response.isSuccessful) {
                 val item = response.body()?.firstOrNull()
                 if (item != null) Resource.Success(item)
-                else Resource.Success(Product(id = productId, name = updates["name"] as? String ?: ""))
+                else Resource.Error("Item was not updated. Please refresh and try again.")
             } else {
                 Resource.Error(extractErrorMessage(response, "Failed to update product"), response.code())
             }
@@ -542,7 +550,11 @@ class VendorRepository(
         try {
             val response = api.deleteProduct("eq.$productId")
             if (response.isSuccessful) {
-                Resource.Success(Unit)
+                if (response.body().isNullOrEmpty()) {
+                    Resource.Error("Item was not deleted. Please refresh and try again.")
+                } else {
+                    Resource.Success(Unit)
+                }
             } else {
                 Resource.Error(extractErrorMessage(response, "Failed to delete product"), response.code())
             }
@@ -630,67 +642,25 @@ class VendorRepository(
         }
     }
 
-    suspend fun getOrderById(orderId: String): Resource<Order> = withContext(Dispatchers.IO) {
-        try {
-            var response = api.getOrderById("eq.$orderId")
-            if (!response.isSuccessful && response.code() == 400) {
-                val errorBodyStr = try { response.errorBody()?.string() } catch (_: Exception) { null }
-                if (errorBodyStr?.contains("orders_address_id_fkey") == true || errorBodyStr?.contains("customer_addresses") == true || errorBodyStr?.contains("relationship") == true) {
-                    response = api.getOrderById(
-                        "eq.$orderId",
-                        select = "*,order_items(*),address:customer_addresses(address_line,landmark,recipient_name,phone)"
-                    )
-                    if (!response.isSuccessful && response.code() == 400) {
-                        response = api.getOrderById("eq.$orderId", select = "*,order_items(*)")
-                    }
-                }
-            }
-            if (response.isSuccessful) {
-                var order = response.body()?.firstOrNull()
-                if (order != null) {
-                    if (order.status?.lowercase() == "pending") {
-                        Resource.Error("Order is still pending City Admin acceptance")
-                    } else {
-                        if (order.customer == null && !order.customer_id.isNullOrBlank()) {
-                            try {
-                                val profRes = api.getProfiles("eq.${order.customer_id}")
-                                val profile = profRes.body()?.firstOrNull()
-                                if (profile != null) {
-                                    order = order.copy(customer = Customer(id = profile.id, full_name = profile.full_name, phone = profile.phone))
-                                }
-                            } catch (_: Exception) {
-                                // Non-blocking enrichment
-                            }
-                        }
-                        Resource.Success(order)
-                    }
-                } else Resource.Error("Order not found")
-            } else {
-                Resource.Error(extractErrorMessage(response, "Failed to fetch order"), response.code())
-            }
-        } catch (e: Exception) {
-            Resource.Error(e.localizedMessage ?: "Error fetching order")
-        }
-    }
-
+    /**
+     * Moves an order to [newStatus] only if it is still in [expectedCurrentStatus].
+     * Order status history is written by a database trigger.
+     */
     suspend fun updateOrderStatus(
         orderId: String,
         newStatus: String,
-        notes: String? = null,
-        cancellationReason: String? = null
+        expectedCurrentStatus: String
     ): Resource<Order> = withContext(Dispatchers.IO) {
         try {
-            // Simplify update to ONLY change status on orders table
-            // Per schema rules: orders table does NOT have per-status timestamp columns
-            // (e.g., preparing_at, confirmed_at, ready_at, etc.).
-            // Order status timestamps are automatically recorded in order_status_history by database trigger.
-            val orderUpdates = mapOf<String, Any?>("status" to newStatus)
-
-            val response = api.updateOrderStatus("eq.$orderId", orderUpdates)
+            val response = api.updateOrderStatus(
+                orderIdFilter = "eq.$orderId",
+                currentStatusFilter = "eq.$expectedCurrentStatus",
+                updates = mapOf("status" to newStatus)
+            )
             if (response.isSuccessful) {
                 val updatedOrder = response.body()?.firstOrNull()
                 if (updatedOrder != null) Resource.Success(updatedOrder)
-                else Resource.Success(Order(id = orderId, status = newStatus, cancellation_reason = cancellationReason))
+                else Resource.Error("This order was already updated. Refreshing orders...", 409)
             } else {
                 Resource.Error(extractErrorMessage(response, "Failed to update order status"), response.code())
             }
@@ -793,32 +763,13 @@ class VendorRepository(
         }
     }
 
-    suspend fun requestWithdrawal(
-        amount: Double,
-        requestId: String? = null
-    ): Resource<Withdrawal> = withContext(Dispatchers.IO) {
+    suspend fun requestWithdrawal(amount: Double): Resource<Withdrawal> = withContext(Dispatchers.IO) {
         try {
-            val body = mutableMapOf<String, Any>(
-                "p_amount" to amount
-            )
-            if (!requestId.isNullOrBlank()) {
-                body["p_request_id"] = requestId
-            }
-            var response = api.vendorRequestWithdrawal(body)
-            // If DB RPC signature does not accept p_request_id, retry with just p_amount
-            if (!response.isSuccessful && !requestId.isNullOrBlank()) {
-                val errorBodyStr = try { response.errorBody()?.string() } catch (_: Exception) { null }
-                if (errorBodyStr?.contains("p_request_id") == true || errorBodyStr?.contains("PGRST202") == true || response.code() == 404) {
-                    response = api.vendorRequestWithdrawal(mapOf("p_amount" to amount))
-                }
-            }
+            val response = api.vendorRequestWithdrawal(mapOf("p_amount" to amount))
             if (response.isSuccessful) {
                 val created = response.body()
-                if (created != null) {
-                    Resource.Success(created)
-                } else {
-                    Resource.Success(Withdrawal(amount = amount, status = "pending", requestId = requestId))
-                }
+                if (created != null) Resource.Success(created)
+                else Resource.Error("Withdrawal request response was empty")
             } else {
                 val errMsg = extractErrorMessage(response, "")
                 Resource.Error(errMsg.ifBlank { "Failed to submit withdrawal request" }, response.code())
@@ -827,14 +778,6 @@ class VendorRepository(
             Resource.Error(e.localizedMessage ?: "Error submitting withdrawal request")
         }
     }
-
-    suspend fun requestWithdrawal(
-        vendorId: String,
-        cityId: String?,
-        amount: Double,
-        note: String? = null,
-        requestId: String? = null
-    ): Resource<Withdrawal> = requestWithdrawal(amount, requestId)
 
     // Reviews (Rule 1: Paginated 20 at a time)
     suspend fun getReviews(vendorId: String, limit: Int = 20, offset: Int = 0): Resource<List<Review>> = withContext(Dispatchers.IO) {
@@ -1058,10 +1001,11 @@ class VendorRepository(
         }
     }
 
-    suspend fun deactivateFcmToken(vendorId: String, token: String? = null): Resource<Unit> = withContext(Dispatchers.IO) {
+    suspend fun deactivateFcmToken(vendorId: String): Resource<Unit> = withContext(Dispatchers.IO) {
         try {
-            api.deactivateVendorFcmTokens("eq.$vendorId", mapOf("is_active" to false))
-            Resource.Success(Unit)
+            val response = api.deactivateVendorFcmTokens("eq.$vendorId", mapOf("is_active" to false))
+            if (response.isSuccessful) Resource.Success(Unit)
+            else Resource.Error(extractErrorMessage(response, "Failed to deactivate FCM token"), response.code())
         } catch (e: Exception) {
             Resource.Error(e.localizedMessage ?: "Error deactivating FCM token")
         }
@@ -1103,7 +1047,6 @@ class VendorRepository(
                     cachedCities = cities
                 }
                 android.util.Log.d("VendorRepository", "Successfully fetched ${cities.size} cities: $cities")
-                println("cities fetch success: fetched ${cities.size} cities: $cities")
                 Resource.Success(cities)
             } else {
                 val errorBody = response.errorBody()?.string()
@@ -1114,14 +1057,11 @@ class VendorRepository(
                     "cities fetch error (HTTP $code): ${response.message()}"
                 }
                 android.util.Log.e("VendorRepository", errorMsg)
-                System.err.println("cities fetch error: $errorMsg")
                 Resource.Error(errorMsg, code)
             }
         } catch (e: Exception) {
             val errorMsg = "cities fetch error (Exception): ${e.localizedMessage ?: e.javaClass.simpleName}"
             android.util.Log.e("VendorRepository", "Cities fetch exception", e)
-            System.err.println("cities fetch error: $errorMsg")
-            e.printStackTrace()
             Resource.Error(errorMsg)
         }
     }
@@ -1373,24 +1313,6 @@ class VendorRepository(
         }
     }
 
-    suspend fun createSignedUrl(path: String, expiresIn: Int = 3600): Resource<String> = withContext(Dispatchers.IO) {
-        try {
-            val response = api.createSignedUrl(path, SignedUrlRequest(expiresIn = expiresIn))
-            if (response.isSuccessful) {
-                val url = response.body()?.signedURL
-                if (!url.isNullOrEmpty()) {
-                    Resource.Success(url)
-                } else {
-                    Resource.Error("Signed URL not returned")
-                }
-            } else {
-                Resource.Error("Failed to generate signed URL: ${response.message()}", response.code())
-            }
-        } catch (e: Exception) {
-            Resource.Error(e.localizedMessage ?: "Error getting document link")
-        }
-    }
-
     suspend fun submitVendorRegistrationWithPaths(
         userId: String,
         ownerName: String,
@@ -1486,7 +1408,6 @@ class VendorRepository(
             if (!vendorResponse.isSuccessful) {
                 val errorMsg = extractErrorMessage(vendorResponse, "Vendor submit error")
                 android.util.Log.e("VendorRepository", "Vendor submit error: $errorMsg (code: ${vendorResponse.code()})")
-                System.err.println("Vendor submit error: $errorMsg")
                 return@withContext Resource.Error(errorMsg, vendorResponse.code())
             }
 
@@ -1529,80 +1450,13 @@ class VendorRepository(
         } catch (e: Exception) {
             val err = "Vendor submit exception: ${e.localizedMessage ?: e.javaClass.simpleName}"
             android.util.Log.e("VendorRepository", err, e)
-            System.err.println("Vendor submit error: $err")
             Resource.Error(err)
-        }
-    }
-
-    suspend fun submitVendorSelfRegistration(
-        userId: String,
-        ownerName: String,
-        hotelName: String,
-        phone: String,
-        cityId: String,
-        address: String,
-        latitude: Double?,
-        longitude: Double?,
-        openingTime: String,
-        closingTime: String,
-        email: String,
-        foodLicenseBytes: ByteArray?,
-        foodLicenseExt: String = "jpg",
-        foodLicenseMime: String = "image/jpeg",
-        aadharBytes: ByteArray?,
-        aadharExt: String = "jpg",
-        aadharMime: String = "image/jpeg"
-    ): Resource<Vendor> = withContext(Dispatchers.IO) {
-        try {
-            var foodLicensePath: String? = null
-            var aadharPath: String? = null
-
-            // 1. Upload Food License if provided
-            if (foodLicenseBytes != null && foodLicenseBytes.isNotEmpty()) {
-                val foodFileName = "food-license-${System.currentTimeMillis()}.$foodLicenseExt"
-                val foodUploadRes = uploadKycDocument(userId, foodFileName, foodLicenseBytes, foodLicenseMime)
-                if (foodUploadRes is Resource.Success) {
-                    foodLicensePath = foodUploadRes.data
-                } else if (foodUploadRes is Resource.Error) {
-                    // Provide helpful error
-                    return@withContext Resource.Error("Food License upload failed: ${foodUploadRes.message}")
-                }
-            }
-
-            // 2. Upload Aadhar Card if provided
-            if (aadharBytes != null && aadharBytes.isNotEmpty()) {
-                val aadharFileName = "aadhar-${System.currentTimeMillis()}.$aadharExt"
-                val aadharUploadRes = uploadKycDocument(userId, aadharFileName, aadharBytes, aadharMime)
-                if (aadharUploadRes is Resource.Success) {
-                    aadharPath = aadharUploadRes.data
-                } else if (aadharUploadRes is Resource.Error) {
-                    return@withContext Resource.Error("Aadhar Card upload failed: ${aadharUploadRes.message}")
-                }
-            }
-
-            // Delegate to submitVendorRegistrationWithPaths
-            submitVendorRegistrationWithPaths(
-                userId = userId,
-                ownerName = ownerName,
-                hotelName = hotelName,
-                phone = phone,
-                cityId = cityId,
-                address = address,
-                latitude = latitude,
-                longitude = longitude,
-                openingTime = openingTime,
-                closingTime = closingTime,
-                email = email,
-                foodLicensePath = foodLicensePath,
-                aadharPath = aadharPath
-            )
-        } catch (e: Exception) {
-            Resource.Error(e.localizedMessage ?: "Error submitting vendor registration")
         }
     }
 
     fun logout() {
         sessionManager.clearSession()
+        clearCaches()
     }
 
     // 14. App Version and Maintenance Mode Checks

@@ -11,9 +11,8 @@ import com.example.data.network.SupabaseClient
 import com.example.data.repository.Resource
 import com.example.data.repository.VendorRepository
 import com.example.util.AppUpdateState
-import com.example.util.NotificationHelper
-import com.example.util.SoundAlertManager
-import com.example.util.compareVersionStrings
+import com.example.service.OrderAlarmService
+import com.example.util.OrderAlertTracker
 import com.example.util.evaluateUpdateState
 import com.google.android.gms.common.ConnectionResult
 import com.google.android.gms.common.GoogleApiAvailability
@@ -27,9 +26,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import java.text.SimpleDateFormat
 import java.util.*
 import java.math.BigDecimal
 import java.math.RoundingMode
@@ -117,8 +116,7 @@ data class OrdersUiState(
     val isLoading: Boolean = false,
     val isUpdating: Boolean = false,
     val errorMessage: String? = null,
-    val successMessage: String? = null,
-    val newPendingAlert: String? = null
+    val successMessage: String? = null
 )
 
 data class EarningsUiState(
@@ -165,8 +163,6 @@ data class ProfileUiState(
     val successMessage: String? = null
 )
 
-val CURRENT_APP_VERSION: String get() = BuildConfig.VERSION_NAME
-
 data class BlockingUpdateState(
     val isBlocked: Boolean = false,
     val updateMessage: String? = null,
@@ -190,14 +186,11 @@ data class MaintenanceBannerState(
     val isDismissedForSession: Boolean = false
 )
 
-fun compareVersions(a: String, b: String): Int = compareVersionStrings(a, b)
-
 class VendorViewModel(application: Application) : AndroidViewModel(application) {
 
     val sessionManager = SessionManager(application.applicationContext)
     private val supabaseClient = SupabaseClient(sessionManager)
     val repository = VendorRepository(supabaseClient, sessionManager)
-    val soundAlertManager = SoundAlertManager(application.applicationContext)
 
     private val _blockingUpdateState = MutableStateFlow(BlockingUpdateState())
     val blockingUpdateState: StateFlow<BlockingUpdateState> = _blockingUpdateState.asStateFlow()
@@ -238,8 +231,7 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
     val registrationState: StateFlow<RegistrationUiState> = _registrationState.asStateFlow()
 
     private val _inAppOrderAlert = MutableStateFlow<String?>(null)
-    val inAppOrderAlert: StateFlow<String?> = _inAppOrderAlert.asStateFlow()
-    val orderAlertNotification: StateFlow<String?> get() = _inAppOrderAlert.asStateFlow()
+    val orderAlertNotification: StateFlow<String?> = _inAppOrderAlert.asStateFlow()
 
     private val _targetNavigation = MutableStateFlow<String?>(null)
     val targetNavigation: StateFlow<String?> = _targetNavigation.asStateFlow()
@@ -248,7 +240,7 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
     val sessionExpiredNotice: StateFlow<String?> = _sessionExpiredNotice.asStateFlow()
 
     private var livePollingJob: Job? = null
-    private var lastKnownConfirmedCount = 0
+    private var isAppInForeground = false
 
     fun navigateToOrders(orderId: String? = null) {
         setOrdersFilter("CONFIRMED")
@@ -445,41 +437,62 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun handleSessionExpired(reason: String = "Your session expired, please log in again") {
-        livePollingJob?.cancel()
-        sessionManager.clearSession()
+        stopAutoPolling()
+        repository.logout()
+        resetVendorData()
         sessionManager.sessionExpiredMessage = reason
         _sessionExpiredNotice.value = reason
         _authUiState.value = AuthUiState.Unauthenticated
+    }
+
+    /** Clears all vendor-specific screen data so a different account never sees stale data. */
+    private fun resetVendorData() {
+        OrderAlertTracker.clear()
+        _inAppOrderAlert.value = null
+        _dashboardState.value = DashboardUiState()
+        _menuState.value = MenuUiState()
+        _ordersState.value = OrdersUiState()
+        _earningsState.value = EarningsUiState()
+        _reviewsState.value = ReviewsUiState()
+        _profileState.value = ProfileUiState(isSoundAlertEnabled = sessionManager.isSoundAlertEnabled)
+    }
+
+    /** Called from Activity.onStart: live order polling runs only while the app is visible. */
+    fun onAppStarted() {
+        isAppInForeground = true
+        val vendor = (_authUiState.value as? AuthUiState.Authenticated)?.vendor ?: return
+        startAutoPolling(vendor.id)
+    }
+
+    /** Called from Activity.onStop: background order alerts are delivered by FCM instead. */
+    fun onAppStopped() {
+        isAppInForeground = false
+        stopAutoPolling()
     }
 
     fun onAppForegrounded() {
         runStartupChecks()
         if (!sessionManager.isLoggedIn) return
 
-        // Register/verify FCM token on every app resume for approved vendor
-        val cachedVendor = sessionManager.cachedVendor
-        if (cachedVendor != null && cachedVendor.approvalStatus.equals("approved", ignoreCase = true)) {
-            registerClientFcmToken(cachedVendor)
-        }
-
-        viewModelScope.launch {
-            // When returning to the app after being idle for hours,
-            // proactively validate or refresh the Supabase session before executing queries
-            when (val refreshRes = repository.validateOrRefreshSession()) {
-                is Resource.Success -> {
-                    val vendorId = currentVendorId()
-                    if (vendorId != null) {
-                        refreshActiveVendorProfile()
-                        refreshAll()
+        when (val state = _authUiState.value) {
+            is AuthUiState.Authenticated -> {
+                registerClientFcmToken(state.vendor)
+                viewModelScope.launch {
+                    if (sessionManager.isTokenExpiredOrExpiringSoon()) {
+                        val refreshRes = repository.validateOrRefreshSession()
+                        if (refreshRes is Resource.Error && refreshRes.code == 401) {
+                            handleSessionExpired("Your session expired, please log in again")
+                            return@launch
+                        }
                     }
+                    refreshActiveVendorProfile()
+                    refreshAll()
                 }
-                is Resource.Error -> {
-                    if (refreshRes.code == 401) {
-                        handleSessionExpired("Your session expired, please log in again")
-                    }
-                }
-                Resource.Loading -> {}
             }
+            // Re-check approval status when a pending/rejected/deactivated vendor returns to the app.
+            is AuthUiState.PendingApproval, is AuthUiState.Rejected, is AuthUiState.Deactivated -> checkSession()
+            // Initial session check is still running (or user is logged out): nothing to do.
+            AuthUiState.Loading, AuthUiState.Unauthenticated -> {}
         }
     }
 
@@ -538,8 +551,13 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
 
     fun refreshStatus() = checkSession()
 
-    private fun processVendorStatus(vendor: Vendor) {
+    /**
+     * Routes the vendor to the right screen. With [loadData] (login / app start) it also loads
+     * every tab and registers this phone for order alerts; profile refreshes pass false.
+     */
+    private fun processVendorStatus(vendor: Vendor, loadData: Boolean = true) {
         if (!vendor.isActive) {
+            stopAutoPolling()
             _authUiState.value = AuthUiState.Deactivated(vendor)
             return
         }
@@ -549,14 +567,20 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
                 _authUiState.value = AuthUiState.Authenticated(vendor)
                 _profileState.update { it.copy(vendor = vendor) }
                 _dashboardState.update { it.copy(isStoreOpen = vendor.isOpen) }
-                loadAllVendorData(vendor.id)
-                startAutoPolling(vendor.id)
-                registerClientFcmToken(vendor)
+                if (loadData) {
+                    refreshAll()
+                    registerClientFcmToken(vendor)
+                }
+                if (isAppInForeground && livePollingJob?.isActive != true) {
+                    startAutoPolling(vendor.id)
+                }
             }
             "rejected" -> {
+                stopAutoPolling()
                 _authUiState.value = AuthUiState.Rejected(vendor, vendor.rejectionReason)
             }
             else -> { // 'pending' or others
+                stopAutoPolling()
                 _authUiState.value = AuthUiState.PendingApproval(vendor)
             }
         }
@@ -582,22 +606,25 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
     fun logout() {
         val currentVendor = (_authUiState.value as? AuthUiState.Authenticated)?.vendor
             ?: sessionManager.cachedVendor
-        if (currentVendor != null) {
-            viewModelScope.launch {
-                repository.deactivateFcmToken(currentVendor.id)
+        stopAutoPolling()
+        OrderAlarmService.stopAlarm(getApplication())
+        _authUiState.value = AuthUiState.Loading
+        viewModelScope.launch {
+            // Deactivate this phone's push token while the session is still valid,
+            // otherwise the logged-out phone keeps receiving the vendor's order alarms.
+            if (currentVendor != null && currentVendor.id.isNotEmpty()) {
+                withTimeoutOrNull(8_000L) { repository.deactivateFcmToken(currentVendor.id) }
             }
+            repository.logout()
+            resetVendorData()
+            _authUiState.value = AuthUiState.Unauthenticated
         }
-        livePollingJob?.cancel()
-        repository.logout()
-        _authUiState.value = AuthUiState.Unauthenticated
-        _dashboardState.update { it.copy(isOrderAlertsOn = false) }
-        _profileState.update { it.copy(isFcmRegistered = false) }
     }
 
     fun refreshActiveVendorProfile() {
         viewModelScope.launch {
             when (val result = repository.fetchVendorProfile()) {
-                is Resource.Success -> processVendorStatus(result.data)
+                is Resource.Success -> processVendorStatus(result.data, loadData = false)
                 is Resource.Error -> {}
                 Resource.Loading -> {}
             }
@@ -608,12 +635,6 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
         return (_authUiState.value as? AuthUiState.Authenticated)?.vendor?.id
             ?: _profileState.value.vendor?.id
             ?: sessionManager.cachedVendor?.id
-    }
-
-    fun loadAllVendorData(vendorId: String) {
-        // Only load essential initial data on launch; other tabs load lazily
-        loadDashboard(vendorId)
-        loadOrders(vendorId)
     }
 
     fun refreshAll() {
@@ -815,6 +836,14 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    private fun showMenuSuccess(message: String) {
+        _menuState.update { it.copy(successMessage = message, errorMessage = null) }
+        viewModelScope.launch {
+            delay(3_000L)
+            _menuState.update { if (it.successMessage == message) it.copy(successMessage = null) else it }
+        }
+    }
+
     fun setMenuSearchQuery(query: String) {
         _menuState.update { it.copy(searchQuery = query) }
     }
@@ -889,10 +918,11 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
         }
         val cityId = _profileState.value.vendor?.cityId ?: sessionManager.cachedVendor?.cityId
         viewModelScope.launch {
-            _menuState.update { it.copy(isSubmitting = true) }
+            _menuState.update { it.copy(isSubmitting = true, errorMessage = null, successMessage = null) }
             when (val res = repository.createCategory(vendorId, name, imageUrl, cityId)) {
                 is Resource.Success -> {
-                    _menuState.update { it.copy(categories = it.categories + res.data, isSubmitting = false, successMessage = "Category added successfully") }
+                    _menuState.update { it.copy(categories = it.categories + res.data, isSubmitting = false) }
+                    showMenuSuccess("Category added successfully")
                     onComplete(true, null)
                 }
                 is Resource.Error -> {
@@ -906,16 +936,16 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
 
     fun updateCategory(id: String, name: String, imageUrl: String, onComplete: (Boolean, String?) -> Unit) {
         viewModelScope.launch {
-            _menuState.update { it.copy(isSubmitting = true) }
+            _menuState.update { it.copy(isSubmitting = true, errorMessage = null, successMessage = null) }
             when (val res = repository.updateCategory(id, name, imageUrl)) {
                 is Resource.Success -> {
                     _menuState.update {
                         it.copy(
                             categories = it.categories.map { c -> if (c.id == id) res.data else c },
-                            isSubmitting = false,
-                            successMessage = "Category updated"
+                            isSubmitting = false
                         )
                     }
+                    showMenuSuccess("Category updated")
                     onComplete(true, null)
                 }
                 is Resource.Error -> {
@@ -929,16 +959,17 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
 
     fun deleteCategory(id: String, onComplete: (Boolean, String?) -> Unit) {
         viewModelScope.launch {
-            _menuState.update { it.copy(isSubmitting = true) }
+            _menuState.update { it.copy(isSubmitting = true, errorMessage = null, successMessage = null) }
             when (val res = repository.deleteCategory(id)) {
                 is Resource.Success -> {
                     _menuState.update {
                         it.copy(
                             categories = it.categories.filter { c -> c.id != id },
-                            isSubmitting = false,
-                            successMessage = "Category deleted"
+                            products = it.products.map { p -> if (p.categoryId == id) p.copy(categoryId = null) else p },
+                            isSubmitting = false
                         )
                     }
+                    showMenuSuccess("Category deleted")
                     onComplete(true, null)
                 }
                 is Resource.Error -> {
@@ -963,12 +994,17 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
         isAvailable: Boolean = true,
         onComplete: (Boolean, String?) -> Unit
     ) {
-        val vendorId = currentVendorId() ?: return
+        val vendorId = currentVendorId()
+        if (vendorId == null) {
+            onComplete(false, "No active vendor profile found. Please re-login.")
+            return
+        }
         viewModelScope.launch {
-            _menuState.update { it.copy(isSubmitting = true) }
+            _menuState.update { it.copy(isSubmitting = true, errorMessage = null, successMessage = null) }
             when (val res = repository.createProduct(vendorId, categoryId, name, description, price, imageUrl, isActive, availableFrom, availableUntil, stockQty, isAvailable)) {
                 is Resource.Success -> {
-                    _menuState.update { it.copy(products = listOf(res.data) + it.products, isSubmitting = false, successMessage = "Product added successfully with $stockQty stock") }
+                    _menuState.update { it.copy(products = listOf(res.data) + it.products, isSubmitting = false) }
+                    showMenuSuccess("Item added to menu")
                     onComplete(true, null)
                 }
                 is Resource.Error -> {
@@ -987,7 +1023,7 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
         )
         updateProduct(productId, updates) { success, err ->
             if (success) {
-                _menuState.update { it.copy(successMessage = "Restocked item to $targetStock portions") }
+                showMenuSuccess("Restocked item to $targetStock portions")
             }
             onComplete(success, err)
         }
@@ -996,12 +1032,12 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
     fun restockZeroStockProducts(targetStock: Int = 100, onComplete: (Boolean, String?) -> Unit = { _, _ -> }) {
         val zeroItems = _menuState.value.products.filter { it.isSoldOut }
         if (zeroItems.isEmpty()) {
-            _menuState.update { it.copy(successMessage = "All items already have stock!") }
+            showMenuSuccess("All items already have stock!")
             onComplete(true, null)
             return
         }
         viewModelScope.launch {
-            _menuState.update { it.copy(isSubmitting = true) }
+            _menuState.update { it.copy(isSubmitting = true, errorMessage = null, successMessage = null) }
             val updates = mapOf(
                 "stock_qty" to targetStock,
                 "is_available" to true
@@ -1035,26 +1071,26 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
             _menuState.update {
                 it.copy(
                     isSubmitting = false,
-                    successMessage = if (successCount > 0) "Successfully restocked $successCount item(s) to $targetStock portions!" else null,
                     errorMessage = if (successCount == 0) lastError else null
                 )
             }
+            if (successCount > 0) showMenuSuccess("Restocked $successCount item(s) to $targetStock portions")
             onComplete(successCount > 0, lastError)
         }
     }
 
     fun updateProduct(productId: String, updates: Map<String, Any?>, onComplete: (Boolean, String?) -> Unit) {
         viewModelScope.launch {
-            _menuState.update { it.copy(isSubmitting = true) }
+            _menuState.update { it.copy(isSubmitting = true, errorMessage = null, successMessage = null) }
             when (val res = repository.updateProduct(productId, updates)) {
                 is Resource.Success -> {
                     _menuState.update {
                         it.copy(
                             products = it.products.map { p -> if (p.id == productId) res.data else p },
-                            isSubmitting = false,
-                            successMessage = "Product updated"
+                            isSubmitting = false
                         )
                     }
+                    showMenuSuccess("Item updated")
                     onComplete(true, null)
                 }
                 is Resource.Error -> {
@@ -1073,8 +1109,16 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
             _menuState.update {
                 it.copy(products = it.products.map { p -> if (p.id == product.id) p.copy(isActive = newStatus) else p })
             }
-            when (val res = repository.updateProduct(product.id, mapOf("is_active" to newStatus))) {
-                is Resource.Success -> {}
+            val updates = mapOf(
+                "is_active" to newStatus,
+                "is_available" to (newStatus && !product.isSoldOut)
+            )
+            when (val res = repository.updateProduct(product.id, updates)) {
+                is Resource.Success -> {
+                    _menuState.update {
+                        it.copy(products = it.products.map { p -> if (p.id == product.id) res.data else p })
+                    }
+                }
                 is Resource.Error -> {
                     // rollback
                     _menuState.update {
@@ -1088,16 +1132,16 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
 
     fun deleteProduct(productId: String, onComplete: (Boolean, String?) -> Unit) {
         viewModelScope.launch {
-            _menuState.update { it.copy(isSubmitting = true) }
+            _menuState.update { it.copy(isSubmitting = true, errorMessage = null, successMessage = null) }
             when (val res = repository.deleteProduct(productId)) {
                 is Resource.Success -> {
                     _menuState.update {
                         it.copy(
                             products = it.products.filter { p -> p.id != productId },
-                            isSubmitting = false,
-                            successMessage = "Product deleted"
+                            isSubmitting = false
                         )
                     }
+                    showMenuSuccess("Item deleted")
                     onComplete(true, null)
                 }
                 is Resource.Error -> {
@@ -1113,33 +1157,24 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
     fun loadOrders(vendorId: String? = null) {
         viewModelScope.launch {
             val vId = vendorId ?: currentVendorId() ?: return@launch
+            // Keep the pages the vendor already loaded when the list is refreshed by polling.
+            val pagesLoaded = (_ordersState.value.page + 1).coerceIn(1, 5)
+            val limit = pagesLoaded * 20
             _ordersState.update { it.copy(isLoading = true, errorMessage = null) }
-            when (val res = repository.getOrders(vId, limit = 20, offset = 0)) {
+            when (val res = repository.getOrders(vId, limit = limit, offset = 0)) {
                 is Resource.Success -> {
-                    val confirmedOrders = res.data.filter { it.status?.lowercase() == "confirmed" }
-                    val confirmedCount = confirmedOrders.size
-                    if (confirmedCount > 0 && (confirmedCount > lastKnownConfirmedCount || lastKnownConfirmedCount == 0)) {
-                        _inAppOrderAlert.value = "🛎️ New Order - Please Prepare!"
-                        soundAlertManager.startRepeatingOrderAlert(
-                            scope = viewModelScope,
-                            isSoundEnabled = { sessionManager.isSoundAlertEnabled },
-                            hasPendingOrders = { _ordersState.value.orders.any { it.status?.lowercase() == "confirmed" } }
-                        )
-                    } else if (confirmedCount == 0) {
-                        soundAlertManager.stopRepeatingAlert()
-                    }
-                    lastKnownConfirmedCount = confirmedCount
-
                     _ordersState.update {
                         it.copy(
                             orders = res.data,
-                            page = 0,
-                            canLoadMore = res.data.size >= 20,
+                            selectedOrder = it.selectedOrder?.let { sel -> res.data.firstOrNull { o -> o.id == sel.id } ?: sel },
+                            page = pagesLoaded - 1,
+                            canLoadMore = res.data.size >= limit,
                             isLoadingMore = false,
                             isLoading = false,
                             errorMessage = null
                         )
                     }
+                    alertForNewConfirmedOrders(res.data)
                 }
                 is Resource.Error -> {
                     if (res.code == 401) {
@@ -1150,6 +1185,33 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
                 }
                 Resource.Loading -> {}
             }
+        }
+    }
+
+    /**
+     * Rings the 10-second alarm once for every confirmed order not announced yet.
+     * Orders already announced by a push notification are skipped (see [OrderAlertTracker]).
+     */
+    private fun alertForNewConfirmedOrders(orders: List<Order>) {
+        val newOrders = orders.filter {
+            it.status?.lowercase() == "confirmed" && OrderAlertTracker.markIfNew(it.id)
+        }
+        if (newOrders.isEmpty()) return
+
+        val first = newOrders.first()
+        val orderLabel = first.orderNumber ?: first.id.take(6).uppercase()
+        _inAppOrderAlert.value = if (newOrders.size == 1) {
+            "🛎️ New Order #$orderLabel - Please Prepare!"
+        } else {
+            "🛎️ ${newOrders.size} New Orders - Please Prepare!"
+        }
+        if (sessionManager.isSoundAlertEnabled && isAppInForeground) {
+            OrderAlarmService.startAlarm(
+                getApplication(),
+                first.id,
+                "New Order - Please Prepare",
+                "Order #$orderLabel is waiting. Tap to open."
+            )
         }
     }
 
@@ -1189,10 +1251,8 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
 
     fun selectOrder(order: Order?) {
         _ordersState.update { it.copy(selectedOrder = order, selectedOrderHistory = emptyList(), isLoadingHistory = order != null) }
-        if (order?.status?.lowercase() in listOf("confirmed", "preparing")) {
-            soundAlertManager.stopRepeatingAlert()
-        }
         if (order != null) {
+            OrderAlarmService.stopAlarm(getApplication())
             viewModelScope.launch {
                 when (val historyRes = repository.getOrderStatusHistory(order.id)) {
                     is Resource.Success -> {
@@ -1207,49 +1267,50 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun selectOrderForDetails(order: Order?) = selectOrder(order)
-
     fun setOrdersFilter(filter: String) {
         _ordersState.update { it.copy(activeFilter = filter) }
     }
 
+    /**
+     * Vendor actions: "confirmed" -> "preparing" (Start Preparing) or "confirmed" -> "cancelled".
+     * The update is applied only if the order is still in [fromStatus] on the server.
+     */
     fun updateOrderStatus(
         orderId: String,
+        fromStatus: String,
         newStatus: String,
-        notes: String? = null,
-        cancellationReason: String? = null,
         onComplete: (Boolean, String?) -> Unit
     ) {
+        if (_ordersState.value.isUpdating) return
+        _ordersState.update { it.copy(isUpdating = true, errorMessage = null) }
+        OrderAlarmService.stopAlarm(getApplication())
         viewModelScope.launch {
-            _ordersState.update { it.copy(isUpdating = true) }
-            when (val res = repository.updateOrderStatus(orderId, newStatus, notes, cancellationReason)) {
+            when (val res = repository.updateOrderStatus(orderId, newStatus, fromStatus)) {
                 is Resource.Success -> {
                     _ordersState.update {
-                        val updatedList = it.orders.map { o ->
-                            if (o.id == orderId) o.copy(status = newStatus, cancellation_reason = cancellationReason ?: o.cancellationReason)
-                            else o
-                        }
                         it.copy(
-                            orders = updatedList,
+                            orders = it.orders.map { o -> if (o.id == orderId) o.copy(status = newStatus) else o },
                             selectedOrder = if (it.selectedOrder?.id == orderId) it.selectedOrder.copy(status = newStatus) else it.selectedOrder,
-                            isUpdating = false,
-                            successMessage = "Order marked as $newStatus"
+                            isUpdating = false
                         )
                     }
-                    val vId = currentVendorId()
-                    if (vId != null) loadDashboard(vId)
+                    if (_inAppOrderAlert.value != null &&
+                        _ordersState.value.orders.none { o -> o.status?.lowercase() == "confirmed" }
+                    ) {
+                        _inAppOrderAlert.value = null
+                    }
+                    loadDashboard()
                     if (_ordersState.value.selectedOrder?.id == orderId) {
-                        viewModelScope.launch {
-                            val historyRes = repository.getOrderStatusHistory(orderId)
-                            if (historyRes is Resource.Success) {
-                                _ordersState.update { it.copy(selectedOrderHistory = historyRes.data) }
-                            }
+                        val historyRes = repository.getOrderStatusHistory(orderId)
+                        if (historyRes is Resource.Success) {
+                            _ordersState.update { it.copy(selectedOrderHistory = historyRes.data) }
                         }
                     }
                     onComplete(true, null)
                 }
                 is Resource.Error -> {
                     _ordersState.update { it.copy(isUpdating = false, errorMessage = res.message) }
+                    if (res.code == 409) loadOrders()
                     onComplete(false, res.message)
                 }
                 Resource.Loading -> {}
@@ -1283,10 +1344,6 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
 
                     if (txRes is Resource.Error) {
                         _earningsState.update { it.copy(isLoading = false, errorMessage = txRes.message) }
-                        return@coroutineScope
-                    }
-                    if (payRes is Resource.Error) {
-                        _earningsState.update { it.copy(isLoading = false, errorMessage = payRes.message) }
                         return@coroutineScope
                     }
                     if (withRes is Resource.Error) {
@@ -1334,9 +1391,6 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
                             isLoading = false,
                             errorMessage = when {
                                 isWalletError && !hasValidBalance -> "Wallet balance unavailable. Tap to retry."
-                                txRes is Resource.Error -> txRes.message
-                                payRes is Resource.Error -> payRes.message
-                                withRes is Resource.Error -> withRes.message
                                 else -> null
                             }
                         )
@@ -1383,7 +1437,7 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun requestWithdrawal(amount: Double, note: String?, onComplete: (Boolean, String?) -> Unit) {
+    fun requestWithdrawal(amount: Double, onComplete: (Boolean, String?) -> Unit) {
         val vendor = (_authUiState.value as? AuthUiState.Authenticated)?.vendor
             ?: sessionManager.cachedVendor ?: return
         val currentState = _earningsState.value
@@ -1415,58 +1469,49 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
             return
         }
 
-        // 3.5: Client UUID request_id for idempotent withdrawal
-        val clientRequestId = UUID.randomUUID().toString()
-
         // Button submit hote hi synchronously disable ho
-        _earningsState.update { it.copy(isSubmittingWithdrawal = true, errorMessage = null) }
+        _earningsState.update { it.copy(isSubmittingWithdrawal = true, errorMessage = null, successMessage = null) }
 
         viewModelScope.launch {
-            when (val res = repository.requestWithdrawal(
-                vendorId = vendor.id,
-                cityId = vendor.cityId,
-                amount = amountBigDecimal.toDouble(),
-                note = note,
-                requestId = clientRequestId
-            )) {
+            when (val res = repository.requestWithdrawal(amountBigDecimal.toDouble())) {
                 is Resource.Success -> {
                     _earningsState.update {
                         it.copy(
                             withdrawals = listOf(res.data) + it.withdrawals.filter { w -> w.id != res.data.id },
-                            isSubmittingWithdrawal = false,
-                            successMessage = "Withdrawal request submitted for approval"
+                            activeWithdrawalInProgress = res.data,
+                            isSubmittingWithdrawal = false
                         )
                     }
+                    showEarningsSuccess("Withdrawal request submitted for approval")
                     loadEarnings(vendor.id)
                     onComplete(true, null)
                 }
                 is Resource.Error -> {
-                    // Timeout/network error recovery: pehle withdrawals dobara fetch karke check karo ki request ban chuki hai ya nahi
+                    // A timeout can hide a request that was actually created: check before reporting failure.
                     val checkRes = repository.getWithdrawals(vendor.id, limit = 5, offset = 0)
-                    if (checkRes is Resource.Success) {
-                        val matchingWithdrawal = checkRes.data.firstOrNull { w ->
-                            (w.requestId != null && w.requestId == clientRequestId) ||
-                            (w.status.lowercase() == "pending" && Math.abs(w.amount - amountBigDecimal.toDouble()) < 0.01)
-                        }
-                        if (matchingWithdrawal != null) {
-                            _earningsState.update {
-                                it.copy(
-                                    withdrawals = checkRes.data,
-                                    isSubmittingWithdrawal = false,
-                                    successMessage = "Withdrawal request submitted for approval"
-                                )
-                            }
-                            loadEarnings(vendor.id)
-                            onComplete(true, null)
-                            return@launch
-                        }
+                    val created = (checkRes as? Resource.Success)?.data?.firstOrNull { w ->
+                        w.status.lowercase() == "pending" && Math.abs(w.amount - amountBigDecimal.toDouble()) < 0.01
                     }
-
-                    _earningsState.update { it.copy(isSubmittingWithdrawal = false, errorMessage = res.message) }
-                    onComplete(false, res.message)
+                    if (res.code == null && created != null) {
+                        _earningsState.update { it.copy(isSubmittingWithdrawal = false) }
+                        showEarningsSuccess("Withdrawal request submitted for approval")
+                        loadEarnings(vendor.id)
+                        onComplete(true, null)
+                    } else {
+                        _earningsState.update { it.copy(isSubmittingWithdrawal = false, errorMessage = res.message) }
+                        onComplete(false, res.message)
+                    }
                 }
                 Resource.Loading -> {}
             }
+        }
+    }
+
+    private fun showEarningsSuccess(message: String) {
+        _earningsState.update { it.copy(successMessage = message) }
+        viewModelScope.launch {
+            delay(4_000L)
+            _earningsState.update { if (it.successMessage == message) it.copy(successMessage = null) else it }
         }
     }
 
@@ -1522,6 +1567,7 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
                         it.copy(
                             reviews = combined,
                             averageRating = if (avg.isNaN()) 0.0 else avg,
+                            totalCount = combined.size,
                             page = nextPage,
                             canLoadMore = newItems.size >= 20,
                             isLoadingMore = false
@@ -1543,7 +1589,8 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
             when (val res = repository.fetchVendorProfile()) {
                 is Resource.Success -> {
                     _profileState.update { it.copy(vendor = res.data, isLoading = false, errorMessage = null) }
-                    _authUiState.value = AuthUiState.Authenticated(res.data)
+                    processVendorStatus(res.data, loadData = false)
+                    loadOperatingHours(res.data.id)
                 }
                 is Resource.Error -> {
                     if (res.code == 401) {
@@ -1943,85 +1990,44 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun registerCustomFcmToken(customToken: String, onComplete: (Boolean, String?) -> Unit) {
-        val vendorId = currentVendorId() ?: return
-        val email = sessionManager.userEmail ?: "${vendorId}@sndmart.vendor"
-        viewModelScope.launch {
-            _profileState.update { it.copy(fcmToken = customToken) }
-            when (val res = repository.registerFcmToken(vendorId, email, customToken)) {
-                is Resource.Success -> {
-                    _profileState.update { it.copy(isFcmRegistered = true, successMessage = "FCM token registered successfully") }
-                    onComplete(true, null)
-                }
-                is Resource.Error -> {
-                    _profileState.update { it.copy(isFcmRegistered = false, errorMessage = res.message) }
-                    onComplete(false, res.message)
-                }
-                Resource.Loading -> {}
-            }
-        }
-    }
-
-    // --- Sound Alert Preference & Simulation ---
+    // --- Sound Alert Preference ---
     fun toggleSoundAlert(enabled: Boolean) {
         sessionManager.isSoundAlertEnabled = enabled
         _profileState.update { it.copy(isSoundAlertEnabled = enabled) }
         if (!enabled) {
-            soundAlertManager.stopRepeatingAlert()
+            OrderAlarmService.stopAlarm(getApplication())
         }
     }
 
+    /** Plays the same 10-second alarm a real order uses, so the vendor can check the volume. */
     fun testSoundAlert() {
-        soundAlertManager.playNewOrderSound(vibrate = true)
-    }
-
-    fun simulateNewOrderAlert() {
-        val sampleOrderId = "ord_${System.currentTimeMillis().toString().takeLast(6)}"
-        val sampleOrderNumber = (1000..9999).random().toString()
-        val customerNames = listOf("Rahul Sharma", "Priya Patel", "Amit Verma", "Sneha Reddy", "Vikram Singh")
-        val sampleCustomer = customerNames.random()
-        val sampleAmount = listOf(280.0, 450.0, 620.0, 890.0, 340.0).random()
-        val sampleItems = listOf(
-            "Butter Chicken x1, Garlic Naan x2",
-            "Paneer Tikka Biryani x2, Gulab Jamun x2",
-            "Masala Dosa x2, Filter Coffee x2, Idli Vada x1",
-            "Veg Fried Rice x1, Chilli Paneer x1, Spring Rolls x1"
-        ).random()
-
-        NotificationHelper.showNewOrderNotification(
-            context = getApplication(),
-            orderId = sampleOrderId,
-            title = "🛎️ New Order #$sampleOrderNumber (${CurrencyFormatter.format(sampleAmount)})",
-            body = "$sampleCustomer • $sampleItems"
+        OrderAlarmService.startAlarm(
+            getApplication(),
+            "test",
+            "Test Order Alert",
+            "This is how a new order will sound."
         )
-        _inAppOrderAlert.value = "🛎️ New Order - Please Prepare! #$sampleOrderNumber"
-        if (sessionManager.isSoundAlertEnabled) {
-            soundAlertManager.playNewOrderSound(vibrate = true)
-        }
-        val vId = currentVendorId()
-        if (vId != null) loadOrders(vId)
     }
 
-    fun simulateIncomingFullScreenOrderAlert() = simulateNewOrderAlert()
-
-    fun clearInAppAlert() {
+    fun clearOrderAlert() {
         _inAppOrderAlert.value = null
-        soundAlertManager.stopRepeatingAlert()
+        OrderAlarmService.stopAlarm(getApplication())
     }
-
-    fun clearOrderAlert() = clearInAppAlert()
-
-    fun simulateNewOrderNotification() = simulateNewOrderAlert()
 
     private fun startAutoPolling(vendorId: String) {
         livePollingJob?.cancel()
         livePollingJob = viewModelScope.launch {
             while (isActive) {
-                delay(15000) // Poll every 15 seconds for live orders and sound alerts
+                delay(15_000L) // Poll every 15 seconds for live orders while the app is visible
                 loadOrders(vendorId)
                 loadDashboard(vendorId)
             }
         }
+    }
+
+    private fun stopAutoPolling() {
+        livePollingJob?.cancel()
+        livePollingJob = null
     }
 
     // --- Vendor Self-Registration ---
@@ -2360,160 +2366,11 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun submitFinalRegistration(
-        userId: String,
-        ownerName: String,
-        hotelName: String,
-        phone: String,
-        cityId: String,
-        address: String,
-        latitude: Double?,
-        longitude: Double?,
-        openingTime: String,
-        closingTime: String,
-        email: String,
-        foodLicensePath: String?,
-        aadharPath: String?,
-        onComplete: (Boolean, String?, Vendor?) -> Unit = { _, _, _ -> }
-    ) {
-        viewModelScope.launch {
-            _registrationState.update { it.copy(isSubmittingRegistration = true, errorMessage = null) }
-            when (val res = repository.submitVendorRegistrationWithPaths(
-                userId = userId,
-                ownerName = ownerName,
-                hotelName = hotelName,
-                phone = phone,
-                cityId = cityId,
-                address = address,
-                latitude = latitude,
-                longitude = longitude,
-                openingTime = openingTime,
-                closingTime = closingTime,
-                email = email,
-                foodLicensePath = foodLicensePath,
-                aadharPath = aadharPath
-            )) {
-                is Resource.Success -> {
-                    _registrationState.update {
-                        it.copy(
-                            isSubmittingRegistration = false,
-                            registeredVendor = res.data,
-                            successMessage = "Application submitted successfully"
-                        )
-                    }
-                    onComplete(true, null, res.data)
-                }
-                is Resource.Error -> {
-                    android.util.Log.e("VendorViewModel", "Vendor submit error: ${res.message}")
-                    _registrationState.update {
-                        it.copy(isSubmittingRegistration = false, errorMessage = res.message)
-                    }
-                    onComplete(false, res.message, null)
-                }
-                Resource.Loading -> {}
-            }
-        }
-    }
-
-    fun submitRegistrationWithOtp(
-        ownerName: String,
-        hotelName: String,
-        phone: String,
-        cityId: String,
-        address: String,
-        latitude: Double?,
-        longitude: Double?,
-        openingTime: String,
-        closingTime: String,
-        email: String,
-        token: String,
-        foodLicenseBytes: ByteArray?,
-        foodLicenseExt: String,
-        foodLicenseMime: String,
-        aadharBytes: ByteArray?,
-        aadharExt: String,
-        aadharMime: String,
-        onComplete: (Boolean, String?, Vendor?) -> Unit
-    ) {
-        viewModelScope.launch {
-            _registrationState.update { it.copy(isSubmittingRegistration = true, errorMessage = null) }
-            // 1. Verify OTP
-            when (val verifyRes = repository.verifyOtp(email, token)) {
-                is Resource.Success -> {
-                    val userId = verifyRes.data.user?.id
-                    if (userId.isNullOrEmpty()) {
-                        _registrationState.update {
-                            it.copy(isSubmittingRegistration = false, errorMessage = "User verification succeeded but no user ID found.")
-                        }
-                        onComplete(false, "User verification succeeded but no user ID found.", null)
-                        return@launch
-                    }
-
-                    // 2. Submit documents, profile & vendor record
-                    when (val regRes = repository.submitVendorSelfRegistration(
-                        userId = userId,
-                        ownerName = ownerName,
-                        hotelName = hotelName,
-                        phone = phone,
-                        cityId = cityId,
-                        address = address,
-                        latitude = latitude,
-                        longitude = longitude,
-                        openingTime = openingTime,
-                        closingTime = closingTime,
-                        email = email,
-                        foodLicenseBytes = foodLicenseBytes,
-                        foodLicenseExt = foodLicenseExt,
-                        foodLicenseMime = foodLicenseMime,
-                        aadharBytes = aadharBytes,
-                        aadharExt = aadharExt,
-                        aadharMime = aadharMime
-                    )) {
-                        is Resource.Success -> {
-                            _registrationState.update {
-                                it.copy(
-                                    isSubmittingRegistration = false,
-                                    registeredVendor = regRes.data,
-                                    successMessage = "Application submitted successfully"
-                                )
-                            }
-                            onComplete(true, null, regRes.data)
-                        }
-                        is Resource.Error -> {
-                            _registrationState.update {
-                                it.copy(isSubmittingRegistration = false, errorMessage = regRes.message)
-                            }
-                            onComplete(false, regRes.message, null)
-                        }
-                        Resource.Loading -> {}
-                    }
-                }
-                is Resource.Error -> {
-                    _registrationState.update {
-                        it.copy(isSubmittingRegistration = false, errorMessage = verifyRes.message)
-                    }
-                    onComplete(false, verifyRes.message, null)
-                }
-                Resource.Loading -> {}
-            }
-        }
+    fun clearRegistrationMessages() {
+        _registrationState.update { it.copy(errorMessage = null, successMessage = null) }
     }
 
     fun resetRegistrationState() {
         _registrationState.value = RegistrationUiState()
-    }
-
-    fun clearMessages() {
-        _menuState.update { it.copy(errorMessage = null, successMessage = null) }
-        _ordersState.update { it.copy(errorMessage = null, successMessage = null) }
-        _earningsState.update { it.copy(errorMessage = null, successMessage = null) }
-        _profileState.update { it.copy(errorMessage = null, successMessage = null) }
-        _registrationState.update { it.copy(errorMessage = null, successMessage = null) }
-        _dashboardState.update { it.copy(errorMessage = null) }
-    }
-
-    override fun onCleared() {
-        super.onCleared()
-        soundAlertManager.release()
     }
 }

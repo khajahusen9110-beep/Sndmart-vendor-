@@ -39,7 +39,6 @@ import com.example.ui.menu.ImageUploadDropzone
 import com.example.ui.menu.SelectedImageFile
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.ProfileUiState
-import com.example.util.NotificationHelper
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -53,8 +52,6 @@ fun StoreProfileScreen(
     onDeleteOperatingHour: (id: String, onComplete: ((Boolean, String?) -> Unit)?) -> Unit,
     onToggleSoundAlert: (Boolean) -> Unit,
     onTestSoundAlert: () -> Unit,
-    onSimulateFullScreenAlert: () -> Unit = {},
-    onRegisterCustomFcmToken: (String, (Boolean, String?) -> Unit) -> Unit,
     onRefreshProfile: () -> Unit = {},
     onLogout: () -> Unit,
     onBack: () -> Unit,
@@ -88,8 +85,6 @@ fun StoreProfileScreen(
     var showAddSlotDialog by remember { mutableStateOf(false) }
     var slotToEdit by remember { mutableStateOf<OperatingHour?>(null) }
     var slotToDelete by remember { mutableStateOf<OperatingHour?>(null) }
-    var customFcmInput by remember { mutableStateOf("") }
-    var isEditingFcm by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -638,7 +633,7 @@ fun StoreProfileScreen(
                                         color = Slate900
                                     )
                                     Text(
-                                        text = if (state.isSoundAlertEnabled) "Plays tone and vibrates on new confirmed orders" else "Sound alerts are muted",
+                                        text = if (state.isSoundAlertEnabled) "Plays a 10-second alarm on new confirmed orders" else "Sound alerts are muted",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = Slate500
                                     )
@@ -655,45 +650,27 @@ fun StoreProfileScreen(
                             )
                         }
 
-                        // Test Buttons
-                        Row(
+                        OutlinedButton(
+                            onClick = onTestSoundAlert,
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp)
                         ) {
-                            OutlinedButton(
-                                onClick = onTestSoundAlert,
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(12.dp),
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp)
-                            ) {
-                                Icon(imageVector = Icons.Outlined.NotificationsActive, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Test Chime", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                            }
-
-                            Button(
-                                onClick = onSimulateFullScreenAlert,
-                                modifier = Modifier.weight(1.3f),
-                                shape = RoundedCornerShape(12.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = SprucePrimary),
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp)
-                            ) {
-                                Icon(imageVector = Icons.Default.Notifications, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Test Alarm Push", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                            }
+                            Icon(imageVector = Icons.Outlined.NotificationsActive, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Test 10-second Order Sound", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                         }
 
                         HorizontalDivider(color = PolishBorderLight)
 
-                        // Push FCM Token Status
+                        // Push notification registration status
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "Push Notification Device Sync",
+                                text = "Order Alerts on this Phone",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 13.sp,
                                 color = Slate900
@@ -703,50 +680,12 @@ fun StoreProfileScreen(
                                 shape = RoundedCornerShape(6.dp)
                             ) {
                                 Text(
-                                    text = if (state.isFcmRegistered) "Registered" else "Ready",
+                                    text = if (state.isFcmRegistered) "Registered" else "Not registered",
                                     color = if (state.isFcmRegistered) PolishEmeraldDark else PolishAmberDark,
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
                                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                                 )
-                            }
-                        }
-
-                        Text(
-                            text = "Token: ${state.fcmToken.ifBlank { "android_fcm_client_token" }}",
-                            fontSize = 11.sp,
-                            color = Slate500,
-                            maxLines = 1
-                        )
-
-                        TextButton(
-                            onClick = { isEditingFcm = !isEditingFcm },
-                            contentPadding = PaddingValues(0.dp)
-                        ) {
-                            Text(if (isEditingFcm) "Cancel Token Setup" else "Update Custom FCM Token", fontSize = 12.sp)
-                        }
-
-                        if (isEditingFcm) {
-                            OutlinedTextField(
-                                value = customFcmInput,
-                                onValueChange = { customFcmInput = it },
-                                label = { Text("Device FCM Token") },
-                                placeholder = { Text("Enter FCM token...") },
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(12.dp)
-                            )
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Button(
-                                onClick = {
-                                    if (customFcmInput.isNotBlank()) {
-                                        onRegisterCustomFcmToken(customFcmInput.trim()) { _, _ -> isEditingFcm = false }
-                                    }
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = SprucePrimary),
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text("Register Token")
                             }
                         }
                     }

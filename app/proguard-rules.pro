@@ -30,10 +30,7 @@
 
 # Firebase Messaging & Push Services
 -keep class com.google.firebase.messaging.** { *; }
--keep class com.example.service.VendorFirebaseMessagingService { *; }
--keep class com.example.util.NotificationHelper { *; }
--keep class com.example.util.SoundAlertManager { *; }
--keep class com.example.util.OrderEventBus { *; }
+-keep class com.example.service.** { *; }
 
 # ViewModels and UI States
 -keep class com.example.ui.viewmodel.** { *; }

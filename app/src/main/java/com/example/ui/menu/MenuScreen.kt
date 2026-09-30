@@ -57,6 +57,9 @@ val SAMPLE_FOOD_IMAGES = listOf(
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
+/** 24-hour time of day such as 7:00, 07:00 or 22:30:00. */
+private val TIME_OF_DAY_REGEX = Regex("^([01]?\\d|2[0-3]):[0-5]\\d(:[0-5]\\d)?$")
+
 @Composable
 fun MenuScreen(
     state: MenuUiState,
@@ -850,7 +853,7 @@ fun MenuScreen(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                                 ) {
-                                    if (category.imageUrl.isNotBlank()) {
+                                    if (!category.imageUrl.isNullOrBlank()) {
                                         AsyncImage(
                                             model = category.imageUrl,
                                             contentDescription = category.name,
@@ -940,6 +943,7 @@ fun MenuScreen(
                         var isEditingTiming by remember { mutableStateOf(false) }
                         var fromTime by remember { mutableStateOf(product.availableFrom ?: "08:00") }
                         var untilTime by remember { mutableStateOf(product.availableUntil ?: "22:00") }
+                        var timingError by remember { mutableStateOf<String?>(null) }
 
                         ElevatedCard(
                             shape = RoundedCornerShape(16.dp),
@@ -1006,6 +1010,10 @@ fun MenuScreen(
                                         )
                                     }
 
+                                    timingError?.let { err ->
+                                        Text(text = err, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
+                                    }
+
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.End,
@@ -1016,7 +1024,9 @@ fun MenuScreen(
                                                 onUpdateProduct(
                                                     product.id,
                                                     mapOf("available_from" to null, "available_until" to null)
-                                                ) { _, _ -> isEditingTiming = false }
+                                                ) { success, err ->
+                                                    if (success) isEditingTiming = false else timingError = err
+                                                }
                                             }
                                         ) {
                                             Text("Clear Timing", color = MaterialTheme.colorScheme.error)
@@ -1024,10 +1034,19 @@ fun MenuScreen(
                                         Spacer(modifier = Modifier.width(8.dp))
                                         Button(
                                             onClick = {
+                                                val from = fromTime.trim()
+                                                val until = untilTime.trim()
+                                                if (!TIME_OF_DAY_REGEX.matches(from) || !TIME_OF_DAY_REGEX.matches(until)) {
+                                                    timingError = "Enter time as HH:MM in 24-hour format, e.g. 07:00 or 22:30"
+                                                    return@Button
+                                                }
+                                                timingError = null
                                                 onUpdateProduct(
                                                     product.id,
-                                                    mapOf("available_from" to fromTime.trim(), "available_until" to untilTime.trim())
-                                                ) { _, _ -> isEditingTiming = false }
+                                                    mapOf("available_from" to from, "available_until" to until)
+                                                ) { success, err ->
+                                                    if (success) isEditingTiming = false else timingError = err
+                                                }
                                             },
                                             colors = ButtonDefaults.buttonColors(containerColor = SndmartOrange),
                                             shape = RoundedCornerShape(10.dp)

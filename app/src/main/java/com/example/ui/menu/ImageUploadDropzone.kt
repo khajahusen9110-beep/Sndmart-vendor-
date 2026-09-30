@@ -71,14 +71,19 @@ fun parseImageUri(context: Context, uri: Uri, fallbackPrefix: String = "image"):
             }
         }
 
+        // 5MB client-side cap limit (checked before reading the file into memory when the size is known)
+        val maxSizeBytes = 5 * 1024 * 1024L
+        if (fileSize > maxSizeBytes) {
+            val sizeMb = String.format(Locale.US, "%.1f", fileSize / (1024.0 * 1024.0))
+            return Pair(null, "File is too large ($sizeMb MB). Maximum allowed size is 5 MB.")
+        }
+
         val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
             ?: return Pair(null, "Could not open selected image stream.")
 
         if (fileSize <= 0L) fileSize = bytes.size.toLong()
 
-        // 5MB client-side cap limit
-        val maxSizeBytes = 5 * 1024 * 1024L
-        if (fileSize > maxSizeBytes || bytes.size > maxSizeBytes) {
+        if (bytes.size > maxSizeBytes) {
             val sizeMb = String.format(Locale.US, "%.1f", (if (fileSize > 0) fileSize else bytes.size.toLong()) / (1024.0 * 1024.0))
             return Pair(null, "File is too large ($sizeMb MB). Maximum allowed size is 5 MB.")
         }

@@ -1328,7 +1328,7 @@ fun RegisterRestaurantScreen(
     // Modal Error Alert if registration submission fails
     if (registrationState.errorMessage != null) {
         AlertDialog(
-            onDismissRequest = { viewModel.clearMessages() },
+            onDismissRequest = { viewModel.clearRegistrationMessages() },
             icon = {
                 Icon(
                     imageVector = Icons.Default.ErrorOutline,
@@ -1353,7 +1353,7 @@ fun RegisterRestaurantScreen(
             },
             confirmButton = {
                 Button(
-                    onClick = { viewModel.clearMessages() },
+                    onClick = { viewModel.clearRegistrationMessages() },
                     colors = ButtonDefaults.buttonColors(containerColor = SprucePrimary)
                 ) {
                     Text("Understood")

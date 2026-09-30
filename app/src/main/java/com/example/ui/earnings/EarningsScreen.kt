@@ -46,7 +46,7 @@ enum class EarningsSubTab(val title: String) {
 @Composable
 fun EarningsScreen(
     state: EarningsUiState,
-    onRequestWithdrawal: (amount: Double, note: String?, onComplete: (Boolean, String?) -> Unit) -> Unit,
+    onRequestWithdrawal: (amount: Double, onComplete: (Boolean, String?) -> Unit) -> Unit,
     onRefresh: () -> Unit,
     onLoadMoreTransactions: () -> Unit = {},
     modifier: Modifier = Modifier
@@ -901,7 +901,7 @@ fun EarningsScreen(
                 isLoading = state.isSubmittingWithdrawal || isSubmittingLocally,
                 onConfirm = {
                     isSubmittingLocally = true
-                    onRequestWithdrawal(amount, null) { success, err ->
+                    onRequestWithdrawal(amount) { success, err ->
                         isSubmittingLocally = false
                         if (success) {
                             showConfirmSubmit = false

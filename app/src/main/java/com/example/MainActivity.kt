@@ -139,6 +139,16 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        viewModel.onAppStarted()
+    }
+
+    override fun onStop() {
+        viewModel.onAppStopped()
+        super.onStop()
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         playUpdateManager.onDestroy()
@@ -213,18 +223,12 @@ class MainActivity : ComponentActivity() {
     }
 
     fun requestIgnoreBatteryOptimization() {
+        // Opens the system battery optimization list; the vendor selects Sndmart Vendor → "Don't optimize".
         try {
-            val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
-                data = Uri.parse("package:$packageName")
-            }
-            startActivity(intent)
+            startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+            Toast.makeText(this, "Select Sndmart Vendor and choose \"Don't optimize\"", Toast.LENGTH_LONG).show()
         } catch (e: Exception) {
-            try {
-                val intent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
-                startActivity(intent)
-            } catch (e2: Exception) {
-                Toast.makeText(this, "Please disable battery optimization in system settings", Toast.LENGTH_SHORT).show()
-            }
+            openAppInfo()
         }
     }
 
@@ -434,12 +438,6 @@ fun MainVendorApp(
                     onTestSoundAlert = {
                         viewModel.testSoundAlert()
                     },
-                    onSimulateFullScreenAlert = {
-                        viewModel.simulateIncomingFullScreenOrderAlert()
-                    },
-                    onRegisterCustomFcmToken = { token, onComplete ->
-                        viewModel.registerCustomFcmToken(token, onComplete)
-                    },
                     onLogout = {
                         showingProfileScreen = false
                         viewModel.logout()
@@ -452,8 +450,7 @@ fun MainVendorApp(
                     topBar = {
                         VendorTopBar(
                             vendor = vendor,
-                            onProfileClick = { showingProfileScreen = true },
-                            onSimulateNotificationClick = { viewModel.simulateNewOrderNotification() }
+                            onProfileClick = { showingProfileScreen = true }
                         )
                     },
                     bottomBar = {
@@ -580,8 +577,8 @@ fun MainVendorApp(
                                         onSelectOrder = { order ->
                                             viewModel.selectOrder(order)
                                         },
-                                        onUpdateOrderStatus = { orderId, newStatus, notes, cancellationReason, onComplete ->
-                                            viewModel.updateOrderStatus(orderId, newStatus, notes, cancellationReason, onComplete)
+                                        onUpdateOrderStatus = { orderId, fromStatus, newStatus, onComplete ->
+                                            viewModel.updateOrderStatus(orderId, fromStatus, newStatus, onComplete)
                                         },
                                         onRefresh = { viewModel.refreshAll() },
                                         onLoadMore = { viewModel.loadMoreOrders() },
@@ -592,8 +589,8 @@ fun MainVendorApp(
                                 VendorNavTab.EARNINGS -> {
                                     EarningsScreen(
                                         state = earningsState,
-                                        onRequestWithdrawal = { amount, note, onComplete ->
-                                            viewModel.requestWithdrawal(amount, note, onComplete)
+                                        onRequestWithdrawal = { amount, onComplete ->
+                                            viewModel.requestWithdrawal(amount, onComplete)
                                         },
                                         onRefresh = { viewModel.refreshAll() },
                                         onLoadMoreTransactions = { viewModel.loadMoreTransactions() }

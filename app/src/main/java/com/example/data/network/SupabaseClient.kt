@@ -20,52 +20,25 @@ import java.util.concurrent.TimeUnit
 class SupabaseClient(private val sessionManager: SessionManager) {
 
     companion object {
-        const val DEFAULT_BASE_URL = "https://zennmoughfhennwgecgo.supabase.co/"
-        const val PROJECT_ID = "zennmoughfhennwgecgo"
-        
-        // Standard Supabase public anonymous key for this project
-        // Can also be set/overridden in SessionManager or secrets panel
-        const val DEFAULT_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inplbm5tb3VnaGZoZW5ud2dlY2dvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MDk4NTYwMDAsImV4cCI6MjAyNTQzMjAwMH0.sndmart_public_anon_placeholder"
+        private const val DEFAULT_BASE_URL = "https://zennmoughfhennwgecgo.supabase.co/"
 
-        fun resolveAnonKey(sessionManager: SessionManager): String {
-            val custom = sessionManager.customAnonKey
-            if (!custom.isNullOrBlank()) return custom
+        // Public (anon) key of the Sndmart Supabase project. It is safe to ship in the app;
+        // data access is protected by Row Level Security. Used only when the build does not
+        // provide SUPABASE_ANON_KEY through .env.
+        private const val DEFAULT_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inplbm5tb3VnaGZoZW5ud2dlY2dvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcwNjI3MjksImV4cCI6MjEwMjYzODcyOX0.xSuD8sYQ4PWgN-YhOaHhwg6hdZYjw2_Jj-XrK3lMERc"
 
-            val buildConfigKey = try {
-                val field = com.example.BuildConfig::class.java.getField("VITE_SUPABASE_ANON_KEY")
-                val v = field.get(null) as? String
-                if (v != null && v != "DEFAULT_KEY" && v.isNotBlank()) v else null
-            } catch (e: Exception) {
-                try {
-                    val field2 = com.example.BuildConfig::class.java.getField("SUPABASE_ANON_KEY")
-                    val v2 = field2.get(null) as? String
-                    if (v2 != null && v2 != "DEFAULT_KEY" && v2.isNotBlank()) v2 else null
-                } catch (e2: Exception) {
-                    null
-                }
-            }
-            if (!buildConfigKey.isNullOrBlank()) return buildConfigKey
+        private fun isConfigured(value: String?): Boolean =
+            !value.isNullOrBlank() && value != "DEFAULT_KEY"
 
-            return DEFAULT_ANON_KEY
+        fun resolveAnonKey(): String {
+            val key = BuildConfig.SUPABASE_ANON_KEY
+            return if (isConfigured(key)) key else DEFAULT_ANON_KEY
         }
 
         fun resolveBaseUrl(): String {
-            val buildConfigUrl = try {
-                val field = com.example.BuildConfig::class.java.getField("VITE_SUPABASE_URL")
-                field.get(null) as? String
-            } catch (e: Exception) {
-                try {
-                    val field2 = com.example.BuildConfig::class.java.getField("SUPABASE_URL")
-                    field2.get(null) as? String
-                } catch (e2: Exception) {
-                    null
-                }
-            }
-            return if (!buildConfigUrl.isNullOrBlank()) {
-                if (buildConfigUrl.endsWith("/")) buildConfigUrl else "$buildConfigUrl/"
-            } else {
-                DEFAULT_BASE_URL
-            }
+            val url = BuildConfig.SUPABASE_URL
+            if (!isConfigured(url)) return DEFAULT_BASE_URL
+            return if (url.endsWith("/")) url else "$url/"
         }
     }
 
@@ -75,7 +48,7 @@ class SupabaseClient(private val sessionManager: SessionManager) {
 
     private val authInterceptor = Interceptor { chain ->
         val original = chain.request()
-        val anonKey = resolveAnonKey(sessionManager)
+        val anonKey = resolveAnonKey()
         val token = sessionManager.accessToken ?: anonKey
 
         val requestBuilder = original.newBuilder()
@@ -126,7 +99,7 @@ class SupabaseClient(private val sessionManager: SessionManager) {
 
                 // If another concurrent request already refreshed the token, retry immediately with new token
                 if (!currentToken.isNullOrBlank() && currentToken != priorTokenSent) {
-                    val anonKey = resolveAnonKey(sessionManager)
+                    val anonKey = resolveAnonKey()
                     return response.request.newBuilder()
                         .header("apikey", anonKey)
                         .header("Authorization", "Bearer $currentToken")
@@ -137,7 +110,7 @@ class SupabaseClient(private val sessionManager: SessionManager) {
                 val refreshed = refreshTokensSynchronously(storedRefreshToken)
                 if (refreshed) {
                     val newToken = sessionManager.accessToken ?: return null
-                    val anonKey = resolveAnonKey(sessionManager)
+                    val anonKey = resolveAnonKey()
                     return response.request.newBuilder()
                         .header("apikey", anonKey)
                         .header("Authorization", "Bearer $newToken")
@@ -151,7 +124,7 @@ class SupabaseClient(private val sessionManager: SessionManager) {
 
     private fun refreshTokensSynchronously(refreshToken: String): Boolean {
         return try {
-            val anonKey = resolveAnonKey(sessionManager)
+            val anonKey = resolveAnonKey()
             val baseUrl = resolveBaseUrl()
             val cleanBaseUrl = if (baseUrl.endsWith("/")) baseUrl else "$baseUrl/"
             val url = "${cleanBaseUrl}auth/v1/token?grant_type=refresh_token"

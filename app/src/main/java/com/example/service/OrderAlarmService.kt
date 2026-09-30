@@ -29,6 +29,11 @@ class OrderAlarmService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    override fun onCreate() {
+        super.onCreate()
+        isRunning = true
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val action = intent?.action
 
@@ -116,7 +121,8 @@ class OrderAlarmService : Service() {
         // 5. Play 10-second alert sound on ALARM audio stream
         playAlertSound()
 
-        // 6. Hard safety timeout after 12 seconds
+        // 6. Hard safety timeout after 12 seconds (replace any timer left from a previous order)
+        stopRunnable?.let { handler.removeCallbacks(it) }
         stopRunnable = Runnable {
             Log.d(TAG, "12-second timeout reached, stopping alarm service")
             stopAlarmInternal()
@@ -189,6 +195,7 @@ class OrderAlarmService : Service() {
 
     override fun onDestroy() {
         stopAlarmInternal()
+        isRunning = false
         super.onDestroy()
     }
 
@@ -201,6 +208,9 @@ class OrderAlarmService : Service() {
         const val EXTRA_TITLE = "extra_title"
         const val EXTRA_BODY = "extra_body"
 
+        @Volatile
+        private var isRunning = false
+
         fun startAlarm(context: Context, orderId: String, title: String, body: String) {
             val intent = Intent(context, OrderAlarmService::class.java).apply {
                 action = ACTION_START_ALARM
@@ -211,12 +221,13 @@ class OrderAlarmService : Service() {
             try {
                 ContextCompat.startForegroundService(context, intent)
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to start foreground alarm service, playing direct sound fallback", e)
-                NotificationHelper.playLongAlertSound(context)
+                Log.e(TAG, "Failed to start foreground alarm service, using notification fallback", e)
+                NotificationHelper.showNewOrderNotification(context, orderId, title, body, playSound = true)
             }
         }
 
         fun stopAlarm(context: Context) {
+            if (!isRunning) return
             try {
                 val intent = Intent(context, OrderAlarmService::class.java).apply {
                     action = ACTION_STOP_ALARM

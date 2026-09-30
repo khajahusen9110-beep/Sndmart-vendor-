@@ -26,7 +26,6 @@ import com.example.ui.theme.*
 fun VendorTopBar(
     vendor: Vendor?,
     onProfileClick: () -> Unit,
-    onSimulateNotificationClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     TopAppBar(
@@ -80,15 +79,6 @@ fun VendorTopBar(
             }
         },
         actions = {
-            // Notification test trigger
-            IconButton(onClick = onSimulateNotificationClick) {
-                Icon(
-                    imageVector = Icons.Outlined.Notifications,
-                    contentDescription = "Test Order Alert Notification",
-                    tint = Slate700
-                )
-            }
-
             // Initials Avatar Circle Button
             val initials = remember(vendor?.ownerName, vendor?.name) {
                 val name = vendor?.ownerName?.ifBlank { vendor.name } ?: "Vendor"

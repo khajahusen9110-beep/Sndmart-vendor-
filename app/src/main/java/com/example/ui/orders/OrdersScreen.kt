@@ -2,6 +2,7 @@ package com.example.ui.orders
 
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -50,7 +51,7 @@ fun OrdersScreen(
     state: OrdersUiState,
     onFilterChange: (String) -> Unit,
     onSelectOrder: (Order?) -> Unit,
-    onUpdateOrderStatus: (orderId: String, newStatus: String, notes: String?, cancellationReason: String?, onComplete: (Boolean, String?) -> Unit) -> Unit,
+    onUpdateOrderStatus: (orderId: String, fromStatus: String, newStatus: String, onComplete: (Boolean, String?) -> Unit) -> Unit,
     onRefresh: () -> Unit,
     onLoadMore: () -> Unit = {},
     onSearchQueryChange: (String) -> Unit = {},
@@ -453,16 +454,22 @@ fun OrdersScreen(
                                         ) {
                                             OutlinedButton(
                                                 onClick = { orderToCancel = order },
+                                                enabled = !state.isUpdating,
                                                 colors = ButtonDefaults.outlinedButtonColors(contentColor = PolishRose),
                                                 shape = RoundedCornerShape(12.dp),
                                                 modifier = Modifier.weight(0.7f)
                                             ) {
                                                 Text("Cancel")
                                             }
-                                             Button(
+                                            Button(
                                                 onClick = {
-                                                    onUpdateOrderStatus(order.id, "preparing", null, null) { _, _ -> }
+                                                    onUpdateOrderStatus(order.id, "confirmed", "preparing") { success, err ->
+                                                        if (!success) {
+                                                            Toast.makeText(context, err ?: "Could not start preparing. Please try again.", Toast.LENGTH_LONG).show()
+                                                        }
+                                                    }
                                                 },
+                                                enabled = !state.isUpdating,
                                                 colors = ButtonDefaults.buttonColors(containerColor = SprucePrimary),
                                                 shape = RoundedCornerShape(12.dp),
                                                 modifier = Modifier.weight(1.3f)
@@ -537,7 +544,7 @@ fun OrdersScreen(
                                     }
                                     "cancelled" -> {
                                         Text(
-                                            text = "✕ Order cancelled: ${order.cancellationReason ?: "Reason not provided"}",
+                                            text = "✕ Order cancelled",
                                             fontSize = 12.sp,
                                             color = PolishRose
                                         )
@@ -629,8 +636,11 @@ fun OrdersScreen(
                                         Row {
                                             IconButton(
                                                 onClick = {
-                                                    val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$detailCustPhone"))
-                                                    context.startActivity(intent)
+                                                    try {
+                                                        context.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:$detailCustPhone")))
+                                                    } catch (_: Exception) {
+                                                        Toast.makeText(context, "No phone app found", Toast.LENGTH_SHORT).show()
+                                                    }
                                                 },
                                                 modifier = Modifier.size(32.dp)
                                             ) {
@@ -638,8 +648,11 @@ fun OrdersScreen(
                                             }
                                             IconButton(
                                                 onClick = {
-                                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://wa.me/${detailCustPhone.replace("+", "")}"))
-                                                    context.startActivity(intent)
+                                                    try {
+                                                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://wa.me/${detailCustPhone.replace("+", "")}")))
+                                                    } catch (_: Exception) {
+                                                        Toast.makeText(context, "WhatsApp is not available", Toast.LENGTH_SHORT).show()
+                                                    }
                                                 },
                                                 modifier = Modifier.size(32.dp)
                                             ) {
@@ -876,68 +889,44 @@ fun OrdersScreen(
         )
     }
 
-    // --- Cancellation Reason Dialog ---
-    if (orderToCancel != null) {
-        val targetOrder = orderToCancel!!
-        var reason by remember { mutableStateOf("") }
-        var reasonError by remember { mutableStateOf<String?>(null) }
-        var isSubmitting by remember { mutableStateOf(false) }
-
+    // --- Cancel Order Confirmation ---
+    orderToCancel?.let { targetOrder ->
         AlertDialog(
-            onDismissRequest = { orderToCancel = null },
+            onDismissRequest = { if (!state.isUpdating) orderToCancel = null },
             title = {
-                Text("Cancel Order #${targetOrder.orderNumber ?: targetOrder.id.take(6).uppercase()}", fontWeight = FontWeight.Bold, color = Slate900)
+                Text("Cancel Order #${targetOrder.orderNumber ?: targetOrder.id.take(6).uppercase()}?", fontWeight = FontWeight.Bold, color = Slate900)
             },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        text = "Please provide a reason for cancelling this order. Vendors cannot cancel without a valid reason.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Slate500
-                    )
-
-                    if (reasonError != null) {
-                        Text(text = reasonError ?: "", color = PolishRose, fontSize = 12.sp)
-                    }
-
-                    OutlinedTextField(
-                        value = reason,
-                        onValueChange = { reason = it; reasonError = null },
-                        label = { Text("Cancellation Reason *") },
-                        placeholder = { Text("e.g. Item out of stock, kitchen closed") },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
-                        maxLines = 3
-                    )
-                }
+                Text(
+                    text = "The customer will be informed that this order was cancelled. This cannot be undone.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Slate500
+                )
             },
             confirmButton = {
                 Button(
                     onClick = {
-                        if (reason.isBlank()) {
-                            reasonError = "Cancellation reason is required"
-                            return@Button
-                        }
-                        isSubmitting = true
-                        onUpdateOrderStatus(targetOrder.id, "cancelled", reason.trim(), reason.trim()) { success, err ->
-                            isSubmitting = false
-                            if (success) orderToCancel = null
-                            else reasonError = err
+                        onUpdateOrderStatus(targetOrder.id, "confirmed", "cancelled") { success, err ->
+                            orderToCancel = null
+                            if (!success) {
+                                Toast.makeText(context, err ?: "Could not cancel the order. Please try again.", Toast.LENGTH_LONG).show()
+                            }
                         }
                     },
-                    enabled = !isSubmitting,
+                    enabled = !state.isUpdating,
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = PolishRose)
                 ) {
-                    Text("Confirm Cancellation", fontWeight = FontWeight.Bold)
+                    Text("Yes, Cancel Order", fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
                 OutlinedButton(
                     onClick = { orderToCancel = null },
+                    enabled = !state.isUpdating,
                     shape = RoundedCornerShape(12.dp)
                 ) {
-                    Text("Dismiss")
+                    Text("Keep Order")
                 }
             },
             shape = RoundedCornerShape(24.dp)

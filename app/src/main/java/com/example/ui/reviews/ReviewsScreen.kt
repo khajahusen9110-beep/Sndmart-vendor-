@@ -113,7 +113,11 @@ fun ReviewsScreen(
                                 Row {
                                     repeat(5) { index ->
                                         Icon(
-                                            imageVector = if (index < state.averageRating.toInt()) Icons.Default.Star else Icons.Default.StarHalf,
+                                            imageVector = when {
+                                                state.averageRating >= index + 1 -> Icons.Default.Star
+                                                state.averageRating >= index + 0.5 -> Icons.Default.StarHalf
+                                                else -> Icons.Default.StarBorder
+                                            },
                                             contentDescription = null,
                                             tint = PolishAmber,
                                             modifier = Modifier.size(18.dp)
@@ -121,7 +125,7 @@ fun ReviewsScreen(
                                     }
                                 }
                                 Text(
-                                    text = "${state.totalCount} verified reviews",
+                                    text = "Based on ${state.totalCount} reviews",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = Slate500
                                 )

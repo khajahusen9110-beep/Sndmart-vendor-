@@ -19,7 +19,6 @@ class SessionManager(context: Context) {
         private const val KEY_USER_ID = "user_id"
         private const val KEY_USER_EMAIL = "user_email"
         private const val KEY_VENDOR_DATA = "vendor_data"
-        private const val KEY_CUSTOM_ANON_KEY = "custom_anon_key"
         private const val KEY_FCM_TOKEN = "fcm_token"
         private const val KEY_SOUND_ALERT_ENABLED = "sound_alert_enabled"
         private const val KEY_SESSION_EXPIRED_MESSAGE = "session_expired_message"
@@ -90,10 +89,6 @@ class SessionManager(context: Context) {
     var userEmail: String?
         get() = prefs.getString(KEY_USER_EMAIL, null)
         set(value) = prefs.edit().putString(KEY_USER_EMAIL, value).apply()
-
-    var customAnonKey: String?
-        get() = prefs.getString(KEY_CUSTOM_ANON_KEY, null)
-        set(value) = prefs.edit().putString(KEY_CUSTOM_ANON_KEY, value).apply()
 
     var fcmToken: String?
         get() = prefs.getString(KEY_FCM_TOKEN, null)
