@@ -57,7 +57,7 @@ jobs:
 
       # Unit tests
       - name: Run unit tests
-        run: gradle testReleaseUnitTest --no-daemon
+        run: gradle testDebugUnitTest --no-daemon
 
       # Build APK
       - name: Build APK
