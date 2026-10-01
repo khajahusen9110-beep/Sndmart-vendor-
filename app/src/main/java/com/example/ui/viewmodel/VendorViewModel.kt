@@ -12,6 +12,7 @@ import com.example.data.repository.Resource
 import com.example.data.repository.VendorRepository
 import com.example.util.AppUpdateState
 import com.example.service.OrderAlarmService
+import com.example.util.DeviceSession
 import com.example.util.OrderAlertTracker
 import com.example.util.evaluateUpdateState
 import com.google.android.gms.common.ConnectionResult
@@ -472,11 +473,17 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
 
     fun onAppForegrounded() {
         runStartupChecks()
-        if (!sessionManager.isLoggedIn) return
+        if (!sessionManager.isLoggedIn) {
+            // Session ended while the app was in the background (e.g. logged in on another phone).
+            if (_authUiState.value !is AuthUiState.Unauthenticated && _authUiState.value !is AuthUiState.Loading) {
+                handleSessionExpired(sessionManager.sessionExpiredMessage ?: DeviceSession.OTHER_DEVICE_MESSAGE)
+            }
+            return
+        }
 
         when (val state = _authUiState.value) {
             is AuthUiState.Authenticated -> {
-                registerClientFcmToken(state.vendor)
+                syncDeviceRegistration(state.vendor, takeOver = false)
                 viewModelScope.launch {
                     if (sessionManager.isTokenExpiredOrExpiringSoon()) {
                         val refreshRes = repository.validateOrRefreshSession()
@@ -555,7 +562,7 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
      * Routes the vendor to the right screen. With [loadData] (login / app start) it also loads
      * every tab and registers this phone for order alerts; profile refreshes pass false.
      */
-    private fun processVendorStatus(vendor: Vendor, loadData: Boolean = true) {
+    private fun processVendorStatus(vendor: Vendor, loadData: Boolean = true, takeOverDevice: Boolean = false) {
         if (!vendor.isActive) {
             stopAutoPolling()
             _authUiState.value = AuthUiState.Deactivated(vendor)
@@ -569,7 +576,7 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
                 _dashboardState.update { it.copy(isStoreOpen = vendor.isOpen) }
                 if (loadData) {
                     refreshAll()
-                    registerClientFcmToken(vendor)
+                    syncDeviceRegistration(vendor, takeOver = takeOverDevice)
                 }
                 if (isAppInForeground && livePollingJob?.isActive != true) {
                     startAutoPolling(vendor.id)
@@ -591,7 +598,8 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
             _authUiState.value = AuthUiState.Loading
             when (val result = repository.login(email, pass)) {
                 is Resource.Success -> {
-                    processVendorStatus(result.data)
+                    // A fresh login makes this phone the account's only active device.
+                    processVendorStatus(result.data, takeOverDevice = true)
                     onResult(true, null)
                 }
                 is Resource.Error -> {
@@ -1930,7 +1938,7 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
                         if (data.reason == "no_device_registered") {
                             val cachedVendor = sessionManager.cachedVendor
                             if (cachedVendor != null) {
-                                registerClientFcmToken(cachedVendor)
+                                syncDeviceRegistration(cachedVendor, takeOver = false)
                             }
                             onResult(false, "This phone is not registered for alerts")
                         } else {
@@ -2014,11 +2022,61 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
         OrderAlarmService.stopAlarm(getApplication())
     }
 
+    /**
+     * Single-device login. A fresh login ([takeOver]) registers this phone as the account's only
+     * device (the previous phone gets a logout push). On app start/resume the phone first checks
+     * that no other phone has logged in since, so an old phone never takes the account back.
+     */
+    fun syncDeviceRegistration(vendor: Vendor, takeOver: Boolean) {
+        if (takeOver) {
+            registerClientFcmToken(vendor)
+            return
+        }
+        viewModelScope.launch {
+            when (val res = repository.isThisDeviceActive()) {
+                is Resource.Success -> {
+                    if (res.data) registerClientFcmToken(vendor) else forceLogoutThisDevice()
+                }
+                is Resource.Error -> {
+                    if (res.code == 401) handleSessionExpired("Your session expired, please log in again")
+                }
+                Resource.Loading -> {}
+            }
+        }
+    }
+
+    /** Returns false (and logs out) when this phone is no longer the account's active device. */
+    private suspend fun ensureThisDeviceIsActive(): Boolean {
+        if (!sessionManager.isLoggedIn) {
+            // Session was ended in the background, e.g. by the "logged in elsewhere" push.
+            handleSessionExpired(sessionManager.sessionExpiredMessage ?: DeviceSession.OTHER_DEVICE_MESSAGE)
+            return false
+        }
+        // Only a phone that registered itself in this session can be replaced by another one.
+        if (!_profileState.value.isFcmRegistered) return true
+        val res = repository.isThisDeviceActive()
+        if (res is Resource.Success && !res.data) {
+            forceLogoutThisDevice()
+            return false
+        }
+        return true
+    }
+
+    private fun forceLogoutThisDevice() {
+        stopAutoPolling()
+        DeviceSession.endLocalSession(getApplication(), sessionManager, DeviceSession.OTHER_DEVICE_MESSAGE)
+        repository.logout()
+        resetVendorData()
+        _sessionExpiredNotice.value = DeviceSession.OTHER_DEVICE_MESSAGE
+        _authUiState.value = AuthUiState.Unauthenticated
+    }
+
     private fun startAutoPolling(vendorId: String) {
         livePollingJob?.cancel()
         livePollingJob = viewModelScope.launch {
             while (isActive) {
                 delay(15_000L) // Poll every 15 seconds for live orders while the app is visible
+                if (!ensureThisDeviceIsActive()) break
                 loadOrders(vendorId)
                 loadDashboard(vendorId)
             }

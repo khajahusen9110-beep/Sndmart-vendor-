@@ -31,6 +31,12 @@ interface SupabaseApi {
     @GET("auth/v1/user")
     suspend fun getAuthUser(): Response<AuthUser>
 
+    // Revokes every other session of this user (single-device login); the current session stays.
+    @POST("auth/v1/logout")
+    suspend fun logoutOtherSessions(
+        @Query("scope") scope: String = "others"
+    ): Response<Unit>
+
     // 1.1 Cities table - matching exact query: .from('cities').select('id, name').eq('status', 'active').order('name')
     @GET("rest/v1/cities")
     suspend fun getCities(
@@ -243,9 +249,15 @@ interface SupabaseApi {
     ): Response<Unit>
 
     // 12. FCM Tokens registration
-    // Moves this phone's token to the logged-in vendor (a token can belong to one vendor only)
+    // Makes this phone the vendor's only active device and sends a logout push to the previous one
     @POST("rest/v1/rpc/register_my_vendor_device_token")
     suspend fun registerMyVendorDeviceToken(
+        @Body body: Map<String, @JvmSuppressWildcards Any?>
+    ): Response<Boolean>
+
+    // False when the vendor account is now active on another phone
+    @POST("rest/v1/rpc/is_my_vendor_device_active")
+    suspend fun isMyVendorDeviceActive(
         @Body body: Map<String, @JvmSuppressWildcards Any?>
     ): Response<Boolean>
 
@@ -253,6 +265,7 @@ interface SupabaseApi {
     @Headers("Prefer: return=representation")
     suspend fun deactivateVendorFcmTokens(
         @Query("vendor_id") vendorIdFilter: String,
+        @Query("fcm_token") fcmTokenFilter: String,
         @Body updates: Map<String, @JvmSuppressWildcards Any?>
     ): Response<List<FcmTokenRegistration>>
 

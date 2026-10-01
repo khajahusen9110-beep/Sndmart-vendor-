@@ -3,7 +3,9 @@ package com.example.service
 import android.util.Log
 import com.example.data.local.SessionManager
 import com.example.data.network.SupabaseClient
+import com.example.data.repository.Resource
 import com.example.data.repository.VendorRepository
+import com.example.util.DeviceSession
 import com.example.util.NotificationHelper
 import com.example.util.OrderAlertTracker
 import com.example.util.OrderEventBus
@@ -32,7 +34,15 @@ class VendorFirebaseMessagingService : FirebaseMessagingService() {
         serviceScope.launch {
             try {
                 val repository = VendorRepository(SupabaseClient(sessionManager), sessionManager)
-                repository.registerFcmToken(vendor.id, vendorEmail, token)
+                // Never take the account back from the phone that logged in after this one.
+                val active = repository.isThisDeviceActive()
+                if (active is Resource.Success && !active.data) {
+                    DeviceSession.endLocalSession(applicationContext, sessionManager, DeviceSession.OTHER_DEVICE_MESSAGE)
+                    return@launch
+                }
+                if (active is Resource.Success) {
+                    repository.registerFcmToken(vendor.id, vendorEmail, token)
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to sync refreshed FCM token", e)
             }
@@ -49,6 +59,13 @@ class VendorFirebaseMessagingService : FirebaseMessagingService() {
         val orderId = data["orderId"] ?: data["order_id"] ?: data["id"] ?: "order_${System.currentTimeMillis()}"
         val title = data["title"] ?: message.notification?.title ?: "Sndmart Order Alert"
         val body = data["message"] ?: data["body"] ?: message.notification?.body ?: "You have a new update"
+
+        if (orderId == FORCE_LOGOUT_ID) {
+            // Sent by register_my_vendor_device_token when the account logs in on another phone.
+            DeviceSession.endLocalSession(applicationContext, sessionManager, DeviceSession.OTHER_DEVICE_MESSAGE)
+            NotificationHelper.showGeneralNotification(this, FORCE_LOGOUT_ID.hashCode(), title, body, targetTab = "home")
+            return
+        }
 
         if (isNewOrderAlert(data, title)) {
             val isTest = orderId == "test" || title.equals(TEST_ALERT_TITLE, ignoreCase = true)
@@ -92,5 +109,7 @@ class VendorFirebaseMessagingService : FirebaseMessagingService() {
         // Titles used by the notify_order_status_change / vendor_send_test_alert database functions.
         private const val NEW_ORDER_TITLE_PREFIX = "New Order - Please Prepare"
         private const val TEST_ALERT_TITLE = "Test Order Alert"
+        // order_id used by register_my_vendor_device_token for the "logged in elsewhere" push.
+        private const val FORCE_LOGOUT_ID = "force_logout"
     }
 }

@@ -180,6 +180,13 @@ class VendorRepository(
             sessionManager.userEmail = body.user.phone ?: body.user.email ?: identifier
             sessionManager.sessionExpiredMessage = null
 
+            // Single-device login: sign out this account everywhere else.
+            try {
+                api.logoutOtherSessions()
+            } catch (e: Exception) {
+                android.util.Log.w("VendorRepository", "Could not revoke other sessions: ${e.message}")
+            }
+
             // Fetch vendor row
             return@withContext fetchVendorProfile()
         } catch (e: Exception) {
@@ -967,7 +974,7 @@ class VendorRepository(
     ): Resource<Unit> = withContext(Dispatchers.IO) {
         try {
             sessionManager.fcmToken = token
-            val body = mapOf("p_token" to token, "p_email" to email)
+            val body = mapOf("p_token" to token, "p_email" to email, "p_device_id" to sessionManager.deviceId)
             val response = api.registerMyVendorDeviceToken(body)
             if (response.isSuccessful) {
                 android.util.Log.d("VendorRepository", "FCM token registered for vendor_id=$vendorId")
@@ -982,13 +989,27 @@ class VendorRepository(
         }
     }
 
+    /** Deactivates the push token only if it still belongs to this phone. */
     suspend fun deactivateFcmToken(vendorId: String): Resource<Unit> = withContext(Dispatchers.IO) {
+        val token = sessionManager.fcmToken
+        if (token.isNullOrBlank()) return@withContext Resource.Success(Unit)
         try {
-            val response = api.deactivateVendorFcmTokens("eq.$vendorId", mapOf("is_active" to false))
+            val response = api.deactivateVendorFcmTokens("eq.$vendorId", "eq.$token", mapOf("is_active" to false))
             if (response.isSuccessful) Resource.Success(Unit)
             else Resource.Error(extractErrorMessage(response, "Failed to deactivate FCM token"), response.code())
         } catch (e: Exception) {
             Resource.Error(e.localizedMessage ?: "Error deactivating FCM token")
+        }
+    }
+
+    /** Success(false) means the vendor account is now active on another phone. */
+    suspend fun isThisDeviceActive(): Resource<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            val response = api.isMyVendorDeviceActive(mapOf("p_device_id" to sessionManager.deviceId))
+            if (response.isSuccessful) Resource.Success(response.body() ?: true)
+            else Resource.Error(extractErrorMessage(response, "Device check failed"), response.code())
+        } catch (e: Exception) {
+            Resource.Error(e.localizedMessage ?: "Device check failed")
         }
     }
 

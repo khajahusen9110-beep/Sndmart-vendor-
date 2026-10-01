@@ -20,6 +20,7 @@ class SessionManager(context: Context) {
         private const val KEY_USER_EMAIL = "user_email"
         private const val KEY_VENDOR_DATA = "vendor_data"
         private const val KEY_FCM_TOKEN = "fcm_token"
+        private const val KEY_DEVICE_ID = "device_install_id"
         private const val KEY_SOUND_ALERT_ENABLED = "sound_alert_enabled"
         private const val KEY_SESSION_EXPIRED_MESSAGE = "session_expired_message"
         private const val KEY_TOKEN_EXPIRES_AT = "token_expires_at"
@@ -89,6 +90,15 @@ class SessionManager(context: Context) {
     var userEmail: String?
         get() = prefs.getString(KEY_USER_EMAIL, null)
         set(value) = prefs.edit().putString(KEY_USER_EMAIL, value).apply()
+
+    /** Random id of this app install; kept across logouts so the same phone is recognised. */
+    val deviceId: String
+        get() {
+            prefs.getString(KEY_DEVICE_ID, null)?.let { return it }
+            val newId = java.util.UUID.randomUUID().toString()
+            prefs.edit().putString(KEY_DEVICE_ID, newId).apply()
+            return newId
+        }
 
     var fcmToken: String?
         get() = prefs.getString(KEY_FCM_TOKEN, null)

@@ -127,7 +127,7 @@ class MainActivity : ComponentActivity() {
                         if (!notifGranted) {
                             requestNotificationPermissionOrOpenSettings()
                         } else {
-                            viewModel.registerClientFcmToken(vendor)
+                            viewModel.syncDeviceRegistration(vendor, takeOver = false)
                             Toast.makeText(this@MainActivity, "Retrying alert registration...", Toast.LENGTH_SHORT).show()
                         }
                     },
