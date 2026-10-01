@@ -967,33 +967,14 @@ class VendorRepository(
     ): Resource<Unit> = withContext(Dispatchers.IO) {
         try {
             sessionManager.fcmToken = token
-            val body = mapOf(
-                "vendor_id" to vendorId,
-                "vendor_type" to "hotel",
-                "vendor_email" to email,
-                "fcm_token" to token,
-                "platform" to "android",
-                "is_active" to true,
-                "firebase_project" to "native_vendor"
-            )
-            var response = api.registerFcmToken(onConflict = "vendor_id", token = body)
-            if (!response.isSuccessful) {
-                val errBody = try { response.errorBody()?.string() } catch (_: Exception) { null }
-                android.util.Log.w("VendorRepository", "FCM registration failed (code=${response.code()}, body=$errBody). Refreshing session to retry...")
-                // Retry once after refreshing session
-                val refreshRes = validateOrRefreshSession()
-                if (refreshRes is Resource.Success) {
-                    response = api.registerFcmToken(onConflict = "vendor_id", token = body)
-                }
-            }
-
+            val body = mapOf("p_token" to token, "p_email" to email)
+            val response = api.registerMyVendorDeviceToken(body)
             if (response.isSuccessful) {
-                android.util.Log.d("VendorRepository", "FCM token successfully registered for vendor_id=$vendorId")
+                android.util.Log.d("VendorRepository", "FCM token registered for vendor_id=$vendorId")
                 Resource.Success(Unit)
             } else {
-                val errBody = try { response.errorBody()?.string() } catch (_: Exception) { null }
-                android.util.Log.e("VendorRepository", "FCM registration error (code=${response.code()}): $errBody")
-                Resource.Error("FCM registration error (code=${response.code()}): $errBody", response.code())
+                val err = extractErrorMessage(response, "FCM registration error")
+                Resource.Error(err, response.code())
             }
         } catch (e: Exception) {
             android.util.Log.e("VendorRepository", "Exception registering FCM token", e)

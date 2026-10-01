@@ -243,12 +243,11 @@ interface SupabaseApi {
     ): Response<Unit>
 
     // 12. FCM Tokens registration
-    @POST("rest/v1/vendor_fcm_tokens")
-    @Headers("Prefer: return=representation,resolution=merge-duplicates")
-    suspend fun registerFcmToken(
-        @Query("on_conflict") onConflict: String = "vendor_id",
-        @Body token: Map<String, @JvmSuppressWildcards Any?>
-    ): Response<List<FcmTokenRegistration>>
+    // Moves this phone's token to the logged-in vendor (a token can belong to one vendor only)
+    @POST("rest/v1/rpc/register_my_vendor_device_token")
+    suspend fun registerMyVendorDeviceToken(
+        @Body body: Map<String, @JvmSuppressWildcards Any?>
+    ): Response<Boolean>
 
     @PATCH("rest/v1/vendor_fcm_tokens")
     @Headers("Prefer: return=representation")
