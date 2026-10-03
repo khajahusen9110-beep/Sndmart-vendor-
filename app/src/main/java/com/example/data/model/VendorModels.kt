@@ -338,8 +338,60 @@ data class Withdrawal(
     @Json(name = "net_payable_amount") val netPayableAmount: Double? = null,
     @Json(name = "paid_at") val paidAt: String? = null,
     @Json(name = "created_at") val createdAt: String? = null,
-    @Json(name = "updated_at") val updatedAt: String? = null
+    @Json(name = "updated_at") val updatedAt: String? = null,
+    // Copy of the payout account taken by the server when the request was made
+    @Json(name = "payout_details") val payoutDetails: PayoutDetailsSnapshot? = null
 )
+
+@JsonClass(generateAdapter = true)
+data class PayoutDetailsSnapshot(
+    @Json(name = "payout_method") val payoutMethod: String? = null,
+    @Json(name = "account_holder_name") val accountHolderName: String? = null,
+    @Json(name = "account_number") val accountNumber: String? = null,
+    @Json(name = "ifsc_code") val ifscCode: String? = null,
+    @Json(name = "bank_name") val bankName: String? = null,
+    @Json(name = "upi_id") val upiId: String? = null,
+    @Json(name = "is_verified") val isVerified: Boolean? = null
+) {
+    /** e.g. "UPI: name@okaxis" or "SBI A/c ••••1234". */
+    val summary: String
+        get() = payoutAccountSummary(payoutMethod, bankName, accountNumber, upiId)
+}
+
+/** One row per hotel; changing it resets [isVerified] until the City Admin verifies it again. */
+@JsonClass(generateAdapter = true)
+data class VendorBankDetails(
+    @Json(name = "vendor_id") val vendorId: String = "",
+    @Json(name = "payout_method") val payoutMethod: String = "",
+    @Json(name = "account_holder_name") val accountHolderName: String? = null,
+    @Json(name = "account_number") val accountNumber: String? = null,
+    @Json(name = "ifsc_code") val ifscCode: String? = null,
+    @Json(name = "bank_name") val bankName: String? = null,
+    @Json(name = "upi_id") val upiId: String? = null,
+    @Json(name = "is_verified") val isVerified: Boolean = false,
+    @Json(name = "verified_at") val verifiedAt: String? = null,
+    @Json(name = "updated_at") val updatedAt: String? = null
+) {
+    val isUpi: Boolean get() = payoutMethod.equals("upi", ignoreCase = true)
+
+    /** e.g. "UPI: name@okaxis" or "SBI A/c ••••1234". */
+    val summary: String
+        get() = payoutAccountSummary(payoutMethod, bankName, accountNumber, upiId)
+}
+
+/** Only the last 4 digits of a bank account are ever shown. */
+fun maskAccountNumber(accountNumber: String?): String {
+    val digits = accountNumber?.trim().orEmpty()
+    return if (digits.length <= 4) digits else "••••" + digits.takeLast(4)
+}
+
+private fun payoutAccountSummary(method: String?, bankName: String?, accountNumber: String?, upiId: String?): String =
+    if (method.equals("upi", ignoreCase = true)) {
+        "UPI: ${upiId.orEmpty()}"
+    } else {
+        val bank = bankName?.takeIf { it.isNotBlank() } ?: "Bank"
+        "$bank A/c ${maskAccountNumber(accountNumber)}"
+    }
 
 @JsonClass(generateAdapter = true)
 data class ReviewCustomer(

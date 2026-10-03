@@ -6,6 +6,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -33,6 +35,7 @@ import com.example.ui.components.StatusBadge
 import com.example.ui.components.TransactionCardSkeleton
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.EarningsUiState
+import com.example.ui.viewmodel.NO_PAYOUT_ACCOUNT_MESSAGE
 import com.example.util.CurrencyFormatter
 import java.math.BigDecimal
 
@@ -47,12 +50,22 @@ enum class EarningsSubTab(val title: String) {
 fun EarningsScreen(
     state: EarningsUiState,
     onRequestWithdrawal: (amount: Double, onComplete: (Boolean, String?) -> Unit) -> Unit,
+    onSaveBankDetails: (
+        payoutMethod: String,
+        accountHolderName: String,
+        accountNumber: String?,
+        ifscCode: String?,
+        bankName: String?,
+        upiId: String?,
+        onComplete: (Boolean, String?) -> Unit
+    ) -> Unit,
     onRefresh: () -> Unit,
     onLoadMoreTransactions: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var activeSubTab by remember { mutableStateOf(EarningsSubTab.TRANSACTIONS) }
     var showWithdrawalDialog by remember { mutableStateOf(false) }
+    var showBankDetailsDialog by remember { mutableStateOf(false) }
     var isHowEarningsWorkExpanded by remember { mutableStateOf(true) }
 
     Column(
@@ -358,6 +371,14 @@ fun EarningsScreen(
             }
         }
 
+        // Where withdrawals are paid (bank account or UPI)
+        PayoutAccountCard(
+            bankDetails = state.bankDetails,
+            isLoaded = state.isBankDetailsLoaded,
+            onEdit = { showBankDetailsDialog = true },
+            modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp)
+        )
+
         // Expandable In-App Info Card: How your earnings work (Rule 3)
         Surface(
             modifier = Modifier
@@ -425,7 +446,7 @@ fun EarningsScreen(
                             lineHeight = 16.sp
                         )
                         Text(
-                            text = "• Commission (${state.commissionPercent.toInt()}%) is deducted when your withdrawal is paid out to your bank account.",
+                            text = "• Commission (${state.commissionPercent.toInt()}%) is deducted when your withdrawal is paid out to your payout account (bank or UPI).",
                             fontSize = 12.sp,
                             color = Slate700,
                             lineHeight = 16.sp
@@ -775,6 +796,14 @@ fun EarningsScreen(
                                         }
                                     }
 
+                                    withdrawal.payoutDetails?.let { payout ->
+                                        Text(
+                                            text = "To: ${payout.summary}",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = Slate600
+                                        )
+                                    }
+
                                     if (!withdrawal.note.isNullOrBlank() && withdrawal.status.lowercase() != "rejected") {
                                         Text(
                                             text = "Note: ${withdrawal.note}",
@@ -880,6 +909,8 @@ fun EarningsScreen(
         var isSubmittingLocally by remember { mutableStateOf(false) }
 
         val hasActiveRequest = state.activeWithdrawalInProgress != null
+        val payoutAccount = state.bankDetails
+        val needsPayoutAccount = state.isBankDetailsLoaded && payoutAccount == null
         val available = state.availableToWithdraw
         val commPercent = state.commissionPercent
         val parsedAmount = amountStr.toDoubleOrNull()
@@ -893,10 +924,11 @@ fun EarningsScreen(
 
             ConfirmationDialog(
                 title = "Confirm Withdrawal",
-                message = "Are you sure you want to request a payout of ${CurrencyFormatter.format(amount)} to your bank account?\n\n" +
+                message = "Are you sure you want to request a payout of ${CurrencyFormatter.format(amount)} to your payout account?\n\n" +
                         "• Requested: ${CurrencyFormatter.format(amount)}\n" +
                         "• Commission (${commPercent.toInt()}%): -${CurrencyFormatter.format(estCommission)}\n" +
-                        "• You will receive in bank: ${CurrencyFormatter.format(estNet)}",
+                        "• You will receive: ${CurrencyFormatter.format(estNet)}" +
+                        (payoutAccount?.let { "\n• Paid to: ${it.summary}" } ?: ""),
                 confirmText = "Submit Request",
                 isLoading = state.isSubmittingWithdrawal || isSubmittingLocally,
                 onConfirm = {
@@ -939,7 +971,9 @@ fun EarningsScreen(
                 },
                 text = {
                     Column(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .verticalScroll(rememberScrollState()),
                         verticalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
                         // 1. Available Wallet Balance Card (Clearly shown above amount input)
@@ -1071,6 +1105,47 @@ fun EarningsScreen(
                                         )
                                     }
                                 }
+                            }
+                        }
+
+                        // Payout destination (required by the server for every withdrawal)
+                        if (!hasActiveRequest) {
+                            if (needsPayoutAccount) {
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = PolishAmberLight,
+                                    border = BorderStroke(1.dp, PolishAmberDark.copy(alpha = 0.35f)),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(12.dp),
+                                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Text(
+                                            text = NO_PAYOUT_ACCOUNT_MESSAGE,
+                                            fontSize = 12.sp,
+                                            color = PolishAmberDark,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                        Button(
+                                            onClick = {
+                                                showWithdrawalDialog = false
+                                                showBankDetailsDialog = true
+                                            },
+                                            colors = ButtonDefaults.buttonColors(containerColor = SprucePrimary),
+                                            shape = RoundedCornerShape(10.dp)
+                                        ) {
+                                            Text("Add Bank / UPI", fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                }
+                            } else if (payoutAccount != null) {
+                                Text(
+                                    text = "Paid to: ${payoutAccount.summary}" +
+                                        if (payoutAccount.isVerified) "" else " (waiting for City Admin verification)",
+                                    fontSize = 12.sp,
+                                    color = Slate600
+                                )
                             }
                         }
 
@@ -1222,7 +1297,8 @@ fun EarningsScreen(
                                 }
                                 showConfirmSubmit = true
                             },
-                            enabled = !state.isSubmittingWithdrawal && !isSubmittingLocally && parsedAmount != null && parsedAmount > 0 && parsedAmount <= available,
+                            enabled = !state.isSubmittingWithdrawal && !isSubmittingLocally && !needsPayoutAccount &&
+                                parsedAmount != null && parsedAmount > 0 && parsedAmount <= available,
                             shape = RoundedCornerShape(12.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = SprucePrimary)
                         ) {
@@ -1252,6 +1328,15 @@ fun EarningsScreen(
                 shape = RoundedCornerShape(24.dp)
             )
         }
+    }
+
+    if (showBankDetailsDialog) {
+        BankDetailsDialog(
+            existing = state.bankDetails,
+            isSaving = state.isSavingBankDetails,
+            onSave = onSaveBankDetails,
+            onDismiss = { showBankDetailsDialog = false }
+        )
     }
 }
 

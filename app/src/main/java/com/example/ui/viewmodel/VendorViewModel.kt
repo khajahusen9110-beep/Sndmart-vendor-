@@ -132,6 +132,9 @@ data class EarningsUiState(
     val availableToWithdraw: Double = 0.0,
     val commissionPercent: Double = 25.0,
     val activeWithdrawalInProgress: Withdrawal? = null,
+    val bankDetails: VendorBankDetails? = null,
+    val isBankDetailsLoaded: Boolean = false,
+    val isSavingBankDetails: Boolean = false,
     val page: Int = 0,
     val canLoadMoreTransactions: Boolean = true,
     val isLoadingMoreTransactions: Boolean = false,
@@ -186,6 +189,9 @@ data class MaintenanceBannerState(
     val message: String? = null,
     val isDismissedForSession: Boolean = false
 )
+
+/** Same text the server returns when a withdrawal is requested without a payout account. */
+const val NO_PAYOUT_ACCOUNT_MESSAGE = "Add your bank account or UPI ID before requesting a withdrawal"
 
 class VendorViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -1338,12 +1344,14 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
                     val payDeferred = async { repository.getPayouts(vId, limit = 20, offset = 0) }
                     val withDeferred = async { repository.getWithdrawals(vId, limit = 50, offset = 0) }
                     val vendorDeferred = async { repository.fetchVendorProfile() }
+                    val bankDeferred = async { repository.getBankDetails(vId) }
 
                     val walletRes = walletDeferred.await()
                     val txRes = txDeferred.await()
                     val payRes = payDeferred.await()
                     val withRes = withDeferred.await()
                     val vendorRes = vendorDeferred.await()
+                    val bankRes = bankDeferred.await()
 
                     if (walletRes.code == 401 || txRes.code == 401 || payRes.code == 401 || withRes.code == 401) {
                         handleSessionExpired("Your session expired, please log in again")
@@ -1382,6 +1390,8 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
 
                     _earningsState.update {
                         it.copy(
+                            bankDetails = if (bankRes is Resource.Success) bankRes.data else it.bankDetails,
+                            isBankDetailsLoaded = bankRes is Resource.Success || it.isBankDetailsLoaded,
                             walletTransactions = txs,
                             payouts = pays,
                             withdrawals = withs,
@@ -1463,6 +1473,14 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
             return
         }
 
+        // The server refuses withdrawals without a payout account; say so before calling it.
+        if (currentState.isBankDetailsLoaded && currentState.bankDetails == null) {
+            val msg = NO_PAYOUT_ACCOUNT_MESSAGE
+            _earningsState.update { it.copy(errorMessage = msg) }
+            onComplete(false, msg)
+            return
+        }
+
         if (amountBigDecimal <= BigDecimal.ZERO) {
             val msg = "Withdrawal amount must be greater than 0"
             _earningsState.update { it.copy(errorMessage = msg) }
@@ -1509,6 +1527,47 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
                         _earningsState.update { it.copy(isSubmittingWithdrawal = false, errorMessage = res.message) }
                         onComplete(false, res.message)
                     }
+                }
+                Resource.Loading -> {}
+            }
+        }
+    }
+
+    /**
+     * Saves the hotel's bank account or UPI ID. Any change resets verification on the server,
+     * so the City Admin has to verify it again. Server validation messages are shown as-is.
+     */
+    fun saveBankDetails(
+        payoutMethod: String,
+        accountHolderName: String,
+        accountNumber: String?,
+        ifscCode: String?,
+        bankName: String?,
+        upiId: String?,
+        onComplete: (Boolean, String?) -> Unit
+    ) {
+        if (_earningsState.value.isSavingBankDetails) return
+        _earningsState.update { it.copy(isSavingBankDetails = true) }
+        viewModelScope.launch {
+            when (val res = repository.saveBankDetails(payoutMethod, accountHolderName, accountNumber, ifscCode, bankName, upiId)) {
+                is Resource.Success -> {
+                    _earningsState.update {
+                        it.copy(
+                            bankDetails = res.data,
+                            isBankDetailsLoaded = true,
+                            isSavingBankDetails = false,
+                            errorMessage = if (it.errorMessage == NO_PAYOUT_ACCOUNT_MESSAGE) null else it.errorMessage
+                        )
+                    }
+                    showEarningsSuccess("Payout details saved. City Admin will verify them.")
+                    onComplete(true, null)
+                }
+                is Resource.Error -> {
+                    _earningsState.update { it.copy(isSavingBankDetails = false) }
+                    if (res.code == 401) {
+                        handleSessionExpired("Your session expired, please log in again")
+                    }
+                    onComplete(false, res.message)
                 }
                 Resource.Loading -> {}
             }

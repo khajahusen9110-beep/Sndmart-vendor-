@@ -770,6 +770,52 @@ class VendorRepository(
         }
     }
 
+    /** Success(null) means the hotel has not added a payout account yet. */
+    suspend fun getBankDetails(vendorId: String): Resource<VendorBankDetails?> = withContext(Dispatchers.IO) {
+        try {
+            val response = api.getBankDetails(vendorIdFilter = "eq.$vendorId")
+            if (response.isSuccessful) {
+                Resource.Success(response.body()?.firstOrNull())
+            } else {
+                Resource.Error(extractErrorMessage(response, "Failed to load payout details"), response.code())
+            }
+        } catch (e: Exception) {
+            Resource.Error(e.localizedMessage ?: "Error loading payout details")
+        }
+    }
+
+    /** Server validation messages are returned unchanged so they can be shown as-is. */
+    suspend fun saveBankDetails(
+        payoutMethod: String,
+        accountHolderName: String,
+        accountNumber: String?,
+        ifscCode: String?,
+        bankName: String?,
+        upiId: String?
+    ): Resource<VendorBankDetails> = withContext(Dispatchers.IO) {
+        try {
+            val body = mapOf(
+                "p_payout_method" to payoutMethod,
+                "p_account_holder_name" to accountHolderName,
+                "p_account_number" to accountNumber,
+                "p_ifsc_code" to ifscCode,
+                "p_bank_name" to bankName,
+                "p_upi_id" to upiId
+            )
+            val response = api.upsertBankDetails(body)
+            if (response.isSuccessful) {
+                val saved = response.body()
+                if (saved != null) Resource.Success(saved)
+                else Resource.Error("Payout details were not saved. Please try again.")
+            } else {
+                val err = extractErrorMessage(response, "")
+                Resource.Error(err.ifBlank { "Payout details were not saved. Please try again." }, response.code())
+            }
+        } catch (e: Exception) {
+            Resource.Error(e.localizedMessage ?: "Error saving payout details")
+        }
+    }
+
     suspend fun requestWithdrawal(amount: Double): Resource<Withdrawal> = withContext(Dispatchers.IO) {
         try {
             val response = api.vendorRequestWithdrawal(mapOf("p_amount" to amount))

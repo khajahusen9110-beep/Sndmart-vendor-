@@ -202,11 +202,23 @@ interface SupabaseApi {
     @GET("rest/v1/vendor_withdrawals")
     suspend fun getWithdrawals(
         @Query("vendor_id") vendorIdFilter: String,
-        @Query("select") select: String = "id,vendor_id,city_id,amount,status,note,commission_amount,net_payable_amount,paid_at,created_at",
+        @Query("select") select: String = "id,vendor_id,city_id,amount,status,note,commission_amount,net_payable_amount,paid_at,created_at,payout_details",
         @Query("order") order: String = "created_at.desc,id.desc",
         @Query("limit") limit: Int? = 20,
         @Query("offset") offset: Int? = 0
     ): Response<List<Withdrawal>>
+
+    // Payout account (bank or UPI) used for withdrawals; RLS returns only this hotel's row
+    @GET("rest/v1/vendor_bank_details")
+    suspend fun getBankDetails(
+        @Query("vendor_id") vendorIdFilter: String,
+        @Query("select") select: String = "vendor_id,payout_method,account_holder_name,account_number,ifsc_code,bank_name,upi_id,is_verified,verified_at,updated_at"
+    ): Response<List<VendorBankDetails>>
+
+    @POST("rest/v1/rpc/vendor_upsert_bank_details")
+    suspend fun upsertBankDetails(
+        @Body body: Map<String, @JvmSuppressWildcards Any?>
+    ): Response<VendorBankDetails>
 
     @POST("rest/v1/rpc/vendor_request_withdrawal")
     suspend fun vendorRequestWithdrawal(

@@ -592,6 +592,9 @@ fun MainVendorApp(
                                         onRequestWithdrawal = { amount, onComplete ->
                                             viewModel.requestWithdrawal(amount, onComplete)
                                         },
+                                        onSaveBankDetails = { method, holder, account, ifsc, bank, upi, onComplete ->
+                                            viewModel.saveBankDetails(method, holder, account, ifsc, bank, upi, onComplete)
+                                        },
                                         onRefresh = { viewModel.refreshAll() },
                                         onLoadMoreTransactions = { viewModel.loadMoreTransactions() }
                                     )
