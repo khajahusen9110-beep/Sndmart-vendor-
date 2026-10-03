@@ -8,11 +8,14 @@ import android.content.Intent
 import android.media.AudioAttributes
 import android.media.MediaPlayer
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.example.MainActivity
 import com.example.R
+import com.example.service.OrderAlarmService
 
 object NotificationHelper {
 
@@ -27,7 +30,7 @@ object NotificationHelper {
             val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
                 ?: return
 
-            // 1. New Orders Channel: High importance, silent sound (so OrderAlarmService plays 10s urgent alarm)
+            // 1. New Orders Channel: High importance, silent sound (OrderAlarmService plays the 1-minute alarm)
             val newOrdersChannel = NotificationChannel(
                 CHANNEL_ID_NEW_ORDERS,
                 CHANNEL_NAME_NEW_ORDERS,
@@ -36,7 +39,7 @@ object NotificationHelper {
                 description = "Urgent alert ringtone notifications for incoming customer orders"
                 enableVibration(true)
                 vibrationPattern = longArrayOf(0, 500, 200, 500, 200, 500, 200, 1000)
-                setSound(null, null) // Silent channel so custom 10s MediaPlayer alarm plays cleanly
+                setSound(null, null) // Silent channel: the alarm sound comes from OrderAlarmService
             }
 
             // 2. General Updates Channel: Standard notifications (rejected, cancelled, withdrawals, broadcasts) with default short sound
@@ -54,8 +57,25 @@ object NotificationHelper {
         }
     }
 
+    /**
+     * Android 14+ only grants full-screen notifications when the user allows them; older versions
+     * always allow it. When false, the alarm still rings and shows a heads-up notification.
+     */
+    fun canUseFullScreenIntent(context: Context): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) return true
+        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+        return manager?.canUseFullScreenIntent() == true
+    }
+
+    // Fallback alarm used only when the foreground alarm service cannot start.
+    @Volatile
+    private var fallbackPlayer: MediaPlayer? = null
+    private val fallbackHandler = Handler(Looper.getMainLooper())
+    private val stopFallbackRunnable = Runnable { stopLongAlertSound() }
+
     fun playLongAlertSound(context: Context) {
         try {
+            stopLongAlertSound()
             val mediaPlayer = MediaPlayer()
             val afd = context.resources.openRawResourceFd(R.raw.order_alert_sound)
             mediaPlayer.setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
@@ -66,12 +86,25 @@ object NotificationHelper {
                     .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                     .build()
             )
-            mediaPlayer.isLooping = false
-            mediaPlayer.setOnCompletionListener { it.release() }
+            mediaPlayer.isLooping = true
             mediaPlayer.prepare()
             mediaPlayer.start()
+            fallbackPlayer = mediaPlayer
+            fallbackHandler.postDelayed(stopFallbackRunnable, OrderAlarmService.ALARM_DURATION_MS)
         } catch (e: Exception) {
             Log.e("NotificationHelper", "Failed to play alert sound", e)
+        }
+    }
+
+    fun stopLongAlertSound() {
+        fallbackHandler.removeCallbacks(stopFallbackRunnable)
+        val player = fallbackPlayer ?: return
+        fallbackPlayer = null
+        try {
+            if (player.isPlaying) player.stop()
+            player.release()
+        } catch (e: Exception) {
+            Log.w("NotificationHelper", "Error stopping alert sound: ${e.message}")
         }
     }
 

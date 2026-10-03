@@ -11,6 +11,8 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <!-- Shows the new-order screen over the lock screen (Android 14+: user must allow it) -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
 
     <application
         android:name=".VendorApplication"
@@ -39,6 +41,18 @@
             </intent-filter>
         </activity>
 
+
+        <!-- Incoming-call style new-order screen, opened by the alarm notification -->
+        <activity
+            android:name=".ui.incoming.IncomingOrderActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTop"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:taskAffinity="com.aistudio.sndmartvendor.incomingorder"
+            android:theme="@style/Theme.MyApplication"
+            tools:targetApi="27" />
 
         <!-- FCM auto-init: required so the push token is generated for background order alerts -->
         <meta-data

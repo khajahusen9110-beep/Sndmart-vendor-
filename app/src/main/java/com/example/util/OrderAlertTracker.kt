@@ -1,7 +1,7 @@
 package com.example.util
 
 /**
- * Remembers which orders have already triggered the 10-second alarm in this app process,
+ * Remembers which orders have already triggered the new-order alarm in this app process,
  * so an order is announced once even if it arrives both by push (FCM) and by in-app polling.
  */
 object OrderAlertTracker {

@@ -1203,7 +1203,7 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     /**
-     * Rings the 10-second alarm once for every confirmed order not announced yet.
+     * Rings the new-order alarm once for every confirmed order not announced yet.
      * Orders already announced by a push notification are skipped (see [OrderAlertTracker]).
      */
     private fun alertForNewConfirmedOrders(orders: List<Order>) {
@@ -2066,7 +2066,7 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    /** Plays the same 10-second alarm a real order uses, so the vendor can check the volume. */
+    /** Plays the same alarm a real order uses, so the vendor can check the volume. */
     fun testSoundAlert() {
         OrderAlarmService.startAlarm(
             getApplication(),

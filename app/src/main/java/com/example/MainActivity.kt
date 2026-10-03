@@ -190,7 +190,7 @@ class MainActivity : ComponentActivity() {
 
     private fun handleIntent(intent: Intent?) {
         try {
-            // Stop 10-second alarm whenever user opens the app from a notification
+            // Stop the order alarm whenever the user opens the app from a notification
             OrderAlarmService.stopAlarm(this)
             val selectedOrderId = intent?.getStringExtra("SELECTED_ORDER_ID")
             if (!selectedOrderId.isNullOrBlank()) {

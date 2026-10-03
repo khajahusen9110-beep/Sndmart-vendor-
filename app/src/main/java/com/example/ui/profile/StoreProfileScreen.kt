@@ -39,6 +39,11 @@ import com.example.ui.menu.ImageUploadDropzone
 import com.example.ui.menu.SelectedImageFile
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.ProfileUiState
+import com.example.util.NotificationHelper
+import android.os.Build
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -633,7 +638,7 @@ fun StoreProfileScreen(
                                         color = Slate900
                                     )
                                     Text(
-                                        text = if (state.isSoundAlertEnabled) "Plays a 10-second alarm on new confirmed orders" else "Sound alerts are muted",
+                                        text = if (state.isSoundAlertEnabled) "Rings for 1 minute on new confirmed orders" else "Sound alerts are muted",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = Slate500
                                     )
@@ -658,8 +663,10 @@ fun StoreProfileScreen(
                         ) {
                             Icon(imageVector = Icons.Outlined.NotificationsActive, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Test 10-second Order Sound", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            Text("Test Order Alarm", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                         }
+
+                        FullScreenAlertSetting()
 
                         HorizontalDivider(color = PolishBorderLight)
 
@@ -1174,4 +1181,59 @@ private fun slotsOverlap(start1: String, end1: String, start2: String, end2: Str
     val e2 = parseMinutes(end2)
     if (s1 == 0 && e1 == 0 || s2 == 0 && e2 == 0) return false
     return maxOf(s1, s2) < minOf(e1, e2)
+}
+
+/**
+ * Android 14+ asks the user to allow full-screen alerts. Without it the order alarm still rings
+ * and shows a heads-up notification, so this row only offers the extra lock-screen display.
+ */
+@Composable
+private fun FullScreenAlertSetting() {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) return
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var isAllowed by remember { mutableStateOf(NotificationHelper.canUseFullScreenIntent(context)) }
+
+    // Re-check when the vendor comes back from the system settings page.
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                isAllowed = NotificationHelper.canUseFullScreenIntent(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text("Full-screen order alert", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Slate900)
+            Text(
+                text = if (isAllowed) "New orders open on the lock screen like a call" else "Off - new orders show as a notification",
+                fontSize = 11.5.sp,
+                color = Slate500
+            )
+        }
+        if (isAllowed) {
+            Text("ON", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = PolishEmeraldDark)
+        } else {
+            TextButton(onClick = {
+                try {
+                    context.startActivity(
+                        Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT).apply {
+                            data = Uri.parse("package:${context.packageName}")
+                        }
+                    )
+                } catch (_: Exception) {
+                    Toast.makeText(context, "Open app settings and allow full-screen notifications", Toast.LENGTH_LONG).show()
+                }
+            }) {
+                Text("Allow", fontWeight = FontWeight.Bold)
+            }
+        }
+    }
 }

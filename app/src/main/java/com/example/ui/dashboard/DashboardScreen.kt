@@ -196,7 +196,7 @@ fun DashboardScreen(
                                 )
                                 Text(
                                     text = if (state.isOrderAlertsOn) {
-                                        "10-second alarm active for new orders"
+                                        "1-minute alarm active for new orders"
                                     } else {
                                         state.orderAlertsOffReason ?: "Push notifications disabled"
                                     },
@@ -285,7 +285,7 @@ fun DashboardScreen(
                                     )
                                 }
                                 Text(
-                                    text = "To ensure the 10-second new order alarm rings when the screen is locked or app is closed, battery optimization must be turned off.",
+                                    text = "To ensure the new order alarm rings when the screen is locked or app is closed, battery optimization must be turned off.",
                                     fontSize = 11.5.sp,
                                     color = Slate700,
                                     lineHeight = 15.sp

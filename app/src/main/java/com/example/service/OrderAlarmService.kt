@@ -18,7 +18,11 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.example.MainActivity
 import com.example.R
+import com.example.ui.incoming.IncomingOrderActivity
 import com.example.util.NotificationHelper
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 
 class OrderAlarmService : Service() {
 
@@ -41,6 +45,8 @@ class OrderAlarmService : Service() {
             Log.d(TAG, "OrderAlarmService received STOP_ALARM action")
             stopAlarmInternal()
             stopSelf()
+            // The vendor handled the alert: close the full-screen order screen too.
+            _alarmHandled.tryEmit(Unit)
             return START_NOT_STICKY
         }
 
@@ -77,7 +83,7 @@ class OrderAlarmService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val notification: Notification = NotificationCompat.Builder(this, NotificationHelper.CHANNEL_ID_NEW_ORDERS)
+        val builder = NotificationCompat.Builder(this, NotificationHelper.CHANNEL_ID_NEW_ORDERS)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(title)
             .setContentText(body)
@@ -90,7 +96,21 @@ class OrderAlarmService : Service() {
             .setAutoCancel(true)
             .setOngoing(false)
             .setSound(null) // Sound played by MediaPlayer on ALARM stream
-            .build()
+
+        // Full-screen order screen (display only, it plays no sound). Android shows it over the
+        // lock screen; when the phone is in use, or the permission is off, it falls back to the
+        // heads-up notification above.
+        if (NotificationHelper.canUseFullScreenIntent(this)) {
+            val fullScreenIntent = IncomingOrderActivity.newIntent(this, orderId, title, body)
+            val fullScreenPendingIntent = PendingIntent.getActivity(
+                this,
+                orderId.hashCode() + 2,
+                fullScreenIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            builder.setFullScreenIntent(fullScreenPendingIntent, true)
+        }
+        val notification: Notification = builder.build()
 
         // 3. Promote to Foreground Service
         try {
@@ -107,28 +127,28 @@ class OrderAlarmService : Service() {
             Log.e(TAG, "Error starting foreground service: ${e.message}", e)
         }
 
-        // 4. Acquire Partial WakeLock for up to 12 seconds so phone CPU doesn't sleep while locked
+        // 4. Keep the CPU awake while the alarm rings so it is not cut short on a locked phone
         try {
             val powerManager = getSystemService(Context.POWER_SERVICE) as? PowerManager
             wakeLock = powerManager?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "VendorApp:OrderAlarmWakeLock")?.apply {
                 setReferenceCounted(false)
-                acquire(12_000L)
+                acquire(ALARM_DURATION_MS + 5_000L)
             }
         } catch (e: Exception) {
             Log.w(TAG, "Notice acquiring wake lock: ${e.message}")
         }
 
-        // 5. Play 10-second alert sound on ALARM audio stream
+        // 5. Ring on the ALARM audio stream (the 10-second sound loops)
         playAlertSound()
 
-        // 6. Hard safety timeout after 12 seconds (replace any timer left from a previous order)
+        // 6. Stop ringing after 1 minute (replace any timer left from a previous order)
         stopRunnable?.let { handler.removeCallbacks(it) }
         stopRunnable = Runnable {
-            Log.d(TAG, "12-second timeout reached, stopping alarm service")
+            Log.d(TAG, "Alarm duration reached, stopping alarm service")
             stopAlarmInternal()
             stopSelf()
         }
-        handler.postDelayed(stopRunnable!!, 12_000L)
+        handler.postDelayed(stopRunnable!!, ALARM_DURATION_MS)
 
         return START_NOT_STICKY
     }
@@ -146,12 +166,8 @@ class OrderAlarmService : Service() {
                         .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                         .build()
                 )
-                isLooping = false
-                setOnCompletionListener {
-                    Log.d(TAG, "MediaPlayer alert sound completed")
-                    stopAlarmInternal()
-                    stopSelf()
-                }
+                // Loops until the 1-minute timer or the vendor stops it
+                isLooping = true
                 prepare()
                 start()
             }
@@ -208,8 +224,16 @@ class OrderAlarmService : Service() {
         const val EXTRA_TITLE = "extra_title"
         const val EXTRA_BODY = "extra_body"
 
+        /** How long a new-order alarm rings unless the vendor acts first. */
+        const val ALARM_DURATION_MS = 60_000L
+
         @Volatile
         private var isRunning = false
+
+        private val _alarmHandled = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+
+        /** Emits when the vendor stops the alarm (Stop Sound, opening the order, Start Preparing...). */
+        val alarmHandled: SharedFlow<Unit> = _alarmHandled.asSharedFlow()
 
         fun startAlarm(context: Context, orderId: String, title: String, body: String) {
             val intent = Intent(context, OrderAlarmService::class.java).apply {
@@ -227,6 +251,7 @@ class OrderAlarmService : Service() {
         }
 
         fun stopAlarm(context: Context) {
+            NotificationHelper.stopLongAlertSound()
             if (!isRunning) return
             try {
                 val intent = Intent(context, OrderAlarmService::class.java).apply {
