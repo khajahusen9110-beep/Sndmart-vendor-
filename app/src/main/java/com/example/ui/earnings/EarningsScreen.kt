@@ -1,6 +1,7 @@
 package com.example.ui.earnings
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -40,12 +41,12 @@ import com.example.util.CurrencyFormatter
 import java.math.BigDecimal
 
 enum class EarningsSubTab(val title: String) {
-    TRANSACTIONS("Wallet Log"),
     WITHDRAWALS("Withdrawals"),
+    TRANSACTIONS("Wallet Log"),
     PAYOUTS("Payouts")
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun EarningsScreen(
     state: EarningsUiState,
@@ -63,450 +64,469 @@ fun EarningsScreen(
     onLoadMoreTransactions: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    var activeSubTab by remember { mutableStateOf(EarningsSubTab.TRANSACTIONS) }
+    var activeSubTab by remember { mutableStateOf(EarningsSubTab.WITHDRAWALS) }
     var showWithdrawalDialog by remember { mutableStateOf(false) }
     var showBankDetailsDialog by remember { mutableStateOf(false) }
-    var isHowEarningsWorkExpanded by remember { mutableStateOf(true) }
+    var isHowEarningsWorkExpanded by remember { mutableStateOf(false) }
 
-    Column(
+    // One scrolling list for the whole page, so the history below is always reachable
+    LazyColumn(
         modifier = modifier
             .fillMaxSize()
-            .background(PolishBackgroundLight)
+            .background(PolishBackgroundLight),
+        contentPadding = PaddingValues(bottom = 24.dp)
     ) {
-        // Global Error / Info Banner if present
-        if (!state.errorMessage.isNullOrBlank()) {
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = PolishRoseLight,
-                border = BorderStroke(1.dp, PolishRose.copy(alpha = 0.35f)),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = 16.dp, end = 16.dp, top = 12.dp)
-            ) {
-                Row(
-                    modifier = Modifier.padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.ErrorOutline,
-                        contentDescription = null,
-                        tint = PolishRose,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Text(
-                        text = state.errorMessage ?: "",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = PolishRoseDark,
-                        fontWeight = FontWeight.Medium,
-                        modifier = Modifier.weight(1f)
-                    )
-                    OutlinedButton(
-                        onClick = onRefresh,
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Text("Retry", fontSize = 12.sp)
-                    }
-                }
-            }
-        } else if (!state.successMessage.isNullOrBlank()) {
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = PolishEmeraldLight,
-                border = BorderStroke(1.dp, PolishEmeraldDark.copy(alpha = 0.3f)),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = 16.dp, end = 16.dp, top = 12.dp)
-            ) {
-                Row(
-                    modifier = Modifier.padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.CheckCircle,
-                        contentDescription = null,
-                        tint = PolishEmeraldDark,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Text(
-                        text = state.successMessage ?: "",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = PolishEmeraldDark,
-                        fontWeight = FontWeight.Medium,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-            }
-        }
-
-        // Balance & Overview Section (Spruce Polish)
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            shape = RoundedCornerShape(24.dp),
-            color = SprucePrimary,
-            shadowElevation = 4.dp
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(18.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.Top
-                ) {
-                    Column {
-                        Text(
-                            text = "Total Wallet Balance",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color.White.copy(alpha = 0.82f)
-                        )
-                        Spacer(modifier = Modifier.height(3.dp))
-                        Text(
-                            text = if (state.hasValidWalletBalance || !state.isWalletBalanceError) {
-                                CurrencyFormatter.format(state.runningBalance)
-                            } else {
-                                "--"
-                            },
-                            fontSize = 30.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = Color.White
-                        )
-                        if (state.isWalletBalanceError) {
-                            Spacer(modifier = Modifier.height(3.dp))
-                            Surface(
-                                color = Color.White.copy(alpha = 0.2f),
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .clickable { onRefresh() }
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Refresh,
-                                        contentDescription = "Retry",
-                                        tint = Color.White,
-                                        modifier = Modifier.size(12.dp)
-                                    )
-                                    Text(
-                                        text = if (state.hasValidWalletBalance) "Cached balance (update failed) • Tap to retry" else "Balance unavailable • Tap to retry",
-                                        fontSize = 11.sp,
-                                        color = Color.White,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                }
-                            }
-                        } else {
-                            Text(
-                                text = "Food subtotal earned from delivered orders",
-                                fontSize = 11.sp,
-                                color = Color.White.copy(alpha = 0.7f)
-                            )
-                        }
-                    }
-
-                    Box(
-                        modifier = Modifier
-                            .size(46.dp)
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(Color.White.copy(alpha = 0.2f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.AccountBalanceWallet,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
-                }
-
-                // Metric Cards: In Progress & Available to Withdraw
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    // In Progress Card
-                    Surface(
-                        modifier = Modifier.weight(1f),
-                        color = Color.White.copy(alpha = 0.14f),
-                        shape = RoundedCornerShape(14.dp)
-                    ) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Schedule,
-                                    contentDescription = null,
-                                    tint = PolishAmberLight,
-                                    modifier = Modifier.size(13.dp)
-                                )
-                                Text(
-                                    text = "In Progress",
-                                    fontSize = 11.sp,
-                                    color = Color.White.copy(alpha = 0.85f),
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = CurrencyFormatter.format(state.inProgressWithdrawalsSum),
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
-                            Text(
-                                text = if (state.activeWithdrawalInProgress != null) "Under admin review" else "None pending",
-                                fontSize = 10.sp,
-                                color = Color.White.copy(alpha = 0.7f),
-                                maxLines = 1
-                            )
-                        }
-                    }
-
-                    // Available to Withdraw Card
-                    Surface(
-                        modifier = Modifier.weight(1f),
-                        color = Color.White.copy(alpha = 0.14f),
-                        shape = RoundedCornerShape(14.dp)
-                    ) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.CheckCircle,
-                                    contentDescription = null,
-                                    tint = PolishEmeraldLight,
-                                    modifier = Modifier.size(13.dp)
-                                )
-                                Text(
-                                    text = "Available to Withdraw",
-                                    fontSize = 11.sp,
-                                    color = Color.White.copy(alpha = 0.85f),
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = CurrencyFormatter.format(state.availableToWithdraw),
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = PolishEmeraldLight
-                            )
-                            Text(
-                                text = "Commission: ${state.commissionPercent.toInt()}% on payout",
-                                fontSize = 10.sp,
-                                color = Color.White.copy(alpha = 0.7f),
-                                maxLines = 1
-                            )
-                        }
-                    }
-                }
-
-                // Request Withdrawal Button or In-Progress Indicator
-                if (state.activeWithdrawalInProgress != null) {
-                    Button(
-                        onClick = { },
-                        enabled = false,
-                        shape = RoundedCornerShape(14.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            disabledContainerColor = PolishAmberLight,
-                            disabledContentColor = PolishAmberDark
-                        ),
-                        contentPadding = PaddingValues(vertical = 12.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Schedule,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "A request is already in progress",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp,
-                            letterSpacing = 0.5.sp
-                        )
-                    }
-                } else {
-                    Button(
-                        onClick = { showWithdrawalDialog = true },
-                        shape = RoundedCornerShape(14.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = SpruceContainerLight,
-                            contentColor = SprucePrimary
-                        ),
-                        contentPadding = PaddingValues(vertical = 12.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Payments,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            "REQUEST WITHDRAWAL",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp,
-                            letterSpacing = 0.5.sp
-                        )
-                    }
-                }
-            }
-        }
-
-        // Where withdrawals are paid (bank account or UPI)
-        PayoutAccountCard(
-            bankDetails = state.bankDetails,
-            isLoaded = state.isBankDetailsLoaded,
-            onEdit = { showBankDetailsDialog = true },
-            modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp)
-        )
-
-        // Expandable In-App Info Card: How your earnings work (Rule 3)
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 2.dp),
-            shape = RoundedCornerShape(16.dp),
-            color = SpruceContainerLight.copy(alpha = 0.7f),
-            border = BorderStroke(1.dp, SpruceBorderLight.copy(alpha = 0.6f))
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 10.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+        item {
+            // Global Error / Info Banner if present
+            if (!state.errorMessage.isNullOrBlank()) {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = PolishRoseLight,
+                    border = BorderStroke(1.dp, PolishRose.copy(alpha = 0.35f)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 16.dp, end = 16.dp, top = 12.dp)
                 ) {
                     Row(
+                        modifier = Modifier.padding(12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.Outlined.Info,
+                            imageVector = Icons.Default.ErrorOutline,
                             contentDescription = null,
-                            tint = SprucePrimary,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Text(
-                            text = "How your earnings work",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp,
-                            color = SpruceOnContainer
-                        )
-                    }
-                    IconButton(
-                        onClick = { isHowEarningsWorkExpanded = !isHowEarningsWorkExpanded },
-                        modifier = Modifier.size(28.dp)
-                    ) {
-                        Icon(
-                            imageVector = if (isHowEarningsWorkExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                            contentDescription = if (isHowEarningsWorkExpanded) "Collapse" else "Expand",
-                            tint = SprucePrimary,
+                            tint = PolishRose,
                             modifier = Modifier.size(20.dp)
                         )
+                        Text(
+                            text = state.errorMessage ?: "",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = PolishRoseDark,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier.weight(1f)
+                        )
+                        OutlinedButton(
+                            onClick = onRefresh,
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("Retry", fontSize = 12.sp)
+                        }
                     }
                 }
-
-                if (isHowEarningsWorkExpanded) {
-                    Spacer(modifier = Modifier.height(6.dp))
-                    HorizontalDivider(color = SpruceBorderLight.copy(alpha = 0.5f))
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(
-                            text = "• When an order is delivered, the food subtotal is added to your wallet balance.",
-                            fontSize = 12.sp,
-                            color = Slate700,
-                            lineHeight = 16.sp
+            } else if (!state.successMessage.isNullOrBlank()) {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = PolishEmeraldLight,
+                    border = BorderStroke(1.dp, PolishEmeraldDark.copy(alpha = 0.3f)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 16.dp, end = 16.dp, top = 12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            tint = PolishEmeraldDark,
+                            modifier = Modifier.size(20.dp)
                         )
                         Text(
-                            text = "• You can request a withdrawal at any time up to your available balance.",
-                            fontSize = 12.sp,
-                            color = Slate700,
-                            lineHeight = 16.sp
-                        )
-                        Text(
-                            text = "• Commission (${state.commissionPercent.toInt()}%) is deducted when your withdrawal is paid out to your payout account (bank or UPI).",
-                            fontSize = 12.sp,
-                            color = Slate700,
-                            lineHeight = 16.sp
-                        )
-                        Text(
-                            text = "• For questions or faster payouts, contact your City Admin.",
-                            fontSize = 12.sp,
-                            color = Slate700,
-                            lineHeight = 16.sp
+                            text = state.successMessage ?: "",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = PolishEmeraldDark,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier.weight(1f)
                         )
                     }
                 }
             }
         }
 
-        // Sub Tabs
-        TabRow(
-            selectedTabIndex = activeSubTab.ordinal,
-            containerColor = PolishSurfaceLight,
-            contentColor = SprucePrimary
-        ) {
-            EarningsSubTab.values().forEach { tab ->
-                Tab(
-                    selected = activeSubTab == tab,
-                    onClick = { activeSubTab = tab },
-                    text = {
-                        Text(
-                            text = tab.title,
-                            fontWeight = if (activeSubTab == tab) FontWeight.Bold else FontWeight.Medium,
-                            color = if (activeSubTab == tab) SprucePrimary else Slate500
-                        )
+        item {
+            // Balance & Overview Section (Spruce Polish)
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                shape = RoundedCornerShape(24.dp),
+                color = SprucePrimary,
+                shadowElevation = 4.dp
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.Top
+                    ) {
+                        Column {
+                            Text(
+                                text = "Total Wallet Balance",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color.White.copy(alpha = 0.82f)
+                            )
+                            Spacer(modifier = Modifier.height(3.dp))
+                            Text(
+                                text = if (state.hasValidWalletBalance || !state.isWalletBalanceError) {
+                                    CurrencyFormatter.format(state.runningBalance)
+                                } else {
+                                    "--"
+                                },
+                                fontSize = 30.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Color.White
+                            )
+                            if (state.isWalletBalanceError) {
+                                Spacer(modifier = Modifier.height(3.dp))
+                                Surface(
+                                    color = Color.White.copy(alpha = 0.2f),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable { onRefresh() }
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Refresh,
+                                            contentDescription = "Retry",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(12.dp)
+                                        )
+                                        Text(
+                                            text = if (state.hasValidWalletBalance) "Cached balance (update failed) • Tap to retry" else "Balance unavailable • Tap to retry",
+                                            fontSize = 11.sp,
+                                            color = Color.White,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
+                                }
+                            } else {
+                                Text(
+                                    text = "Food subtotal earned from delivered orders",
+                                    fontSize = 11.sp,
+                                    color = Color.White.copy(alpha = 0.7f)
+                                )
+                            }
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .size(46.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(Color.White.copy(alpha = 0.2f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.AccountBalanceWallet,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
                     }
-                )
+
+                    // Metric Cards: In Progress & Available to Withdraw
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        // In Progress Card
+                        Surface(
+                            modifier = Modifier.weight(1f),
+                            color = Color.White.copy(alpha = 0.14f),
+                            shape = RoundedCornerShape(14.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Schedule,
+                                        contentDescription = null,
+                                        tint = PolishAmberLight,
+                                        modifier = Modifier.size(13.dp)
+                                    )
+                                    Text(
+                                        text = "In Progress",
+                                        fontSize = 11.sp,
+                                        color = Color.White.copy(alpha = 0.85f),
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = CurrencyFormatter.format(state.inProgressWithdrawalsSum),
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                                Text(
+                                    text = if (state.activeWithdrawalInProgress != null) "Under admin review" else "None pending",
+                                    fontSize = 10.sp,
+                                    color = Color.White.copy(alpha = 0.7f),
+                                    maxLines = 1
+                                )
+                            }
+                        }
+
+                        // Available to Withdraw Card
+                        Surface(
+                            modifier = Modifier.weight(1f),
+                            color = Color.White.copy(alpha = 0.14f),
+                            shape = RoundedCornerShape(14.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.CheckCircle,
+                                        contentDescription = null,
+                                        tint = PolishEmeraldLight,
+                                        modifier = Modifier.size(13.dp)
+                                    )
+                                    Text(
+                                        text = "Available to Withdraw",
+                                        fontSize = 11.sp,
+                                        color = Color.White.copy(alpha = 0.85f),
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = CurrencyFormatter.format(state.availableToWithdraw),
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = PolishEmeraldLight
+                                )
+                                Text(
+                                    text = "Commission: ${state.commissionPercent.toInt()}% on payout",
+                                    fontSize = 10.sp,
+                                    color = Color.White.copy(alpha = 0.7f),
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                    }
+
+                    // Request Withdrawal Button or In-Progress Indicator
+                    if (state.activeWithdrawalInProgress != null) {
+                        Button(
+                            onClick = { },
+                            enabled = false,
+                            shape = RoundedCornerShape(14.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                disabledContainerColor = PolishAmberLight,
+                                disabledContentColor = PolishAmberDark
+                            ),
+                            contentPadding = PaddingValues(vertical = 12.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Schedule,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "A request is already in progress",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp,
+                                letterSpacing = 0.5.sp
+                            )
+                        }
+                    } else {
+                        Button(
+                            onClick = { showWithdrawalDialog = true },
+                            shape = RoundedCornerShape(14.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = SpruceContainerLight,
+                                contentColor = SprucePrimary
+                            ),
+                            contentPadding = PaddingValues(vertical = 12.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Payments,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                "REQUEST WITHDRAWAL",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp,
+                                letterSpacing = 0.5.sp
+                            )
+                        }
+                    }
+                }
             }
         }
+
+        item {
+            // Where withdrawals are paid (bank account or UPI)
+            PayoutAccountCard(
+                bankDetails = state.bankDetails,
+                isLoaded = state.isBankDetailsLoaded,
+                onEdit = { showBankDetailsDialog = true },
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp)
+            )
+        }
+
+        item {
+            // Expandable In-App Info Card: How your earnings work (Rule 3)
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 16.dp, end = 16.dp, bottom = 10.dp),
+                shape = RoundedCornerShape(16.dp),
+                color = SpruceContainerLight.copy(alpha = 0.7f),
+                border = BorderStroke(1.dp, SpruceBorderLight.copy(alpha = 0.6f))
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Info,
+                                contentDescription = null,
+                                tint = SprucePrimary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text(
+                                text = "How your earnings work",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp,
+                                color = SpruceOnContainer
+                            )
+                        }
+                        IconButton(
+                            onClick = { isHowEarningsWorkExpanded = !isHowEarningsWorkExpanded },
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (isHowEarningsWorkExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                contentDescription = if (isHowEarningsWorkExpanded) "Collapse" else "Expand",
+                                tint = SprucePrimary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+
+                    if (isHowEarningsWorkExpanded) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        HorizontalDivider(color = SpruceBorderLight.copy(alpha = 0.5f))
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                text = "• When an order is delivered, the food subtotal is added to your wallet balance.",
+                                fontSize = 12.sp,
+                                color = Slate700,
+                                lineHeight = 16.sp
+                            )
+                            Text(
+                                text = "• You can request a withdrawal at any time up to your available balance.",
+                                fontSize = 12.sp,
+                                color = Slate700,
+                                lineHeight = 16.sp
+                            )
+                            Text(
+                                text = "• Commission (${state.commissionPercent.toInt()}%) is deducted when your withdrawal is paid out to your payout account (bank or UPI).",
+                                fontSize = 12.sp,
+                                color = Slate700,
+                                lineHeight = 16.sp
+                            )
+                            Text(
+                                text = "• For questions or faster payouts, contact your City Admin.",
+                                fontSize = 12.sp,
+                                color = Slate700,
+                                lineHeight = 16.sp
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // Tabs stay pinned to the top while the list scrolls
+        stickyHeader {
+            TabRow(
+                selectedTabIndex = activeSubTab.ordinal,
+                containerColor = PolishSurfaceLight,
+                contentColor = SprucePrimary
+            ) {
+                EarningsSubTab.values().forEach { tab ->
+                    val count = when (tab) {
+                        EarningsSubTab.WITHDRAWALS -> state.withdrawals.size
+                        EarningsSubTab.TRANSACTIONS -> state.walletTransactions.size
+                        EarningsSubTab.PAYOUTS -> state.payouts.size
+                    }
+                    Tab(
+                        selected = activeSubTab == tab,
+                        onClick = { activeSubTab = tab },
+                        text = {
+                            Text(
+                                text = if (count > 0) "${tab.title} ($count)" else tab.title,
+                                fontSize = 13.sp,
+                                maxLines = 1,
+                                fontWeight = if (activeSubTab == tab) FontWeight.Bold else FontWeight.Medium,
+                                color = if (activeSubTab == tab) SprucePrimary else Slate500
+                            )
+                        }
+                    )
+                }
+            }
+        }
+
+        item { Spacer(modifier = Modifier.height(10.dp)) }
 
         // Subtab content
         when (activeSubTab) {
             EarningsSubTab.TRANSACTIONS -> {
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 16.dp),
-                    contentPadding = PaddingValues(vertical = 14.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    if (state.isLoading && state.walletTransactions.isEmpty()) {
-                        items(4) {
+                if (state.isLoading && state.walletTransactions.isEmpty()) {
+                    items(4) {
+                        TabListItem {
                             TransactionCardSkeleton()
                         }
-                    } else if (state.walletTransactions.isEmpty()) {
-                        item {
+                    }
+                } else if (state.walletTransactions.isEmpty()) {
+                    item {
+                        TabListItem {
                             EmptyStateCard(
                                 icon = Icons.Outlined.Receipt,
                                 title = "No wallet transactions yet",
                                 description = "Earnings from completed orders and settlement logs will appear here."
                             )
                         }
-                    } else {
-                        items(state.walletTransactions, key = { it.id }) { tx ->
+                    }
+                } else {
+                    items(state.walletTransactions, key = { it.id }) { tx ->
+                        TabListItem {
                             val kind = tx.kind
                             val amountBd = CurrencyFormatter.toBigDecimal(tx.amount) ?: BigDecimal.ZERO
                             val isNegative = tx.amount < 0.0
@@ -598,14 +618,18 @@ fun EarningsScreen(
                                 }
                             }
                         }
+                    }
 
-                        // Rule 1: Pagination footer (20 transactions at a time)
-                        if (state.isLoadingMoreTransactions) {
-                            item {
+                    // Rule 1: Pagination footer (20 transactions at a time)
+                    if (state.isLoadingMoreTransactions) {
+                        item {
+                            TabListItem {
                                 TransactionCardSkeleton()
                             }
-                        } else if (state.canLoadMoreTransactions) {
-                            item {
+                        }
+                    } else if (state.canLoadMoreTransactions) {
+                        item {
+                            TabListItem {
                                 Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -627,26 +651,23 @@ fun EarningsScreen(
                         }
                     }
                 }
+            
             }
 
             EarningsSubTab.WITHDRAWALS -> {
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 16.dp),
-                    contentPadding = PaddingValues(vertical = 14.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    if (state.withdrawals.isEmpty()) {
-                        item {
+                if (state.withdrawals.isEmpty()) {
+                    item {
+                        TabListItem {
                             EmptyStateCard(
                                 icon = Icons.Outlined.Payments,
                                 title = "No withdrawal requests",
                                 description = "Request payouts anytime to transfer available balance to your bank."
                             )
                         }
-                    } else {
-                        items(state.withdrawals, key = { it.id }) { withdrawal ->
+                    }
+                } else {
+                    items(state.withdrawals, key = { it.id }) { withdrawal ->
+                        TabListItem {
                             val commRate = state.commissionPercent
                             val commAmount = withdrawal.commissionAmount ?: (withdrawal.amount * commRate / 100.0)
                             val netPayable = withdrawal.netPayableAmount ?: (withdrawal.amount - commAmount)
@@ -822,26 +843,23 @@ fun EarningsScreen(
                         }
                     }
                 }
+            
             }
 
             EarningsSubTab.PAYOUTS -> {
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 16.dp),
-                    contentPadding = PaddingValues(vertical = 14.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    if (state.payouts.isEmpty()) {
-                        item {
+                if (state.payouts.isEmpty()) {
+                    item {
+                        TabListItem {
                             EmptyStateCard(
                                 icon = Icons.Outlined.AccountBalance,
                                 title = "No settled payouts yet",
                                 description = "Admin processed payout batches will be recorded here."
                             )
                         }
-                    } else {
-                        items(state.payouts, key = { it.id }) { payout ->
+                    }
+                } else {
+                    items(state.payouts, key = { it.id }) { payout ->
+                        TabListItem {
                             Surface(
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(18.dp),
@@ -1422,3 +1440,15 @@ fun EmptyStateCard(
     }
 }
 
+
+/** Padding and spacing for the cards inside the Wallet Log / Withdrawals / Payouts tabs. */
+@Composable
+private fun TabListItem(content: @Composable () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 5.dp)
+    ) {
+        content()
+    }
+}

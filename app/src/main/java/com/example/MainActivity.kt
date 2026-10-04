@@ -50,12 +50,17 @@ import com.example.ui.reviews.ReviewsScreen
 import com.example.ui.theme.SndmartVendorTheme
 import com.example.ui.viewmodel.AuthUiState
 import com.example.ui.viewmodel.VendorViewModel
+import com.example.ui.components.FullScreenPermissionScreen
+import com.example.util.NotificationHelper
 import com.example.util.PlayUpdateManager
 
 class MainActivity : ComponentActivity() {
     private val viewModel: VendorViewModel by viewModels()
     private lateinit var playUpdateManager: PlayUpdateManager
     private var isFlexibleUpdateDownloaded by mutableStateOf(false)
+
+    // Android 14+: the app stays on the permission screen until full-screen alerts are allowed.
+    private var isFullScreenPermissionRequired by mutableStateOf(false)
 
     private val playUpdateResultLauncher = registerForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult()
@@ -80,61 +85,66 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         playUpdateManager = PlayUpdateManager(this)
+        isFullScreenPermissionRequired = NotificationHelper.isFullScreenPermissionRequired(this)
         checkNotificationPermission()
         handleIntent(intent)
 
         setContent {
             SndmartVendorTheme {
-                val blockingUpdate by viewModel.blockingUpdateState.collectAsStateWithLifecycle()
-                val optionalUpdate by viewModel.optionalUpdateState.collectAsStateWithLifecycle()
+                if (isFullScreenPermissionRequired) {
+                    FullScreenPermissionScreen(onAllow = { openFullScreenPermissionSettings() })
+                } else {
+                    val blockingUpdate by viewModel.blockingUpdateState.collectAsStateWithLifecycle()
+                    val optionalUpdate by viewModel.optionalUpdateState.collectAsStateWithLifecycle()
 
-                MainVendorApp(
-                    viewModel = viewModel,
-                    initialTargetTab = intent.getStringExtra("NAVIGATE_TO"),
-                    isUpdateDownloaded = isFlexibleUpdateDownloaded,
-                    onUpdateNow = {
-                        playUpdateManager.startImmediateUpdate(
-                            activity = this@MainActivity,
-                            launcher = playUpdateResultLauncher,
-                            onFallback = {
-                                openUpdateDestination(this@MainActivity, blockingUpdate.updateUrl)
+                    MainVendorApp(
+                        viewModel = viewModel,
+                        initialTargetTab = intent.getStringExtra("NAVIGATE_TO"),
+                        isUpdateDownloaded = isFlexibleUpdateDownloaded,
+                        onUpdateNow = {
+                            playUpdateManager.startImmediateUpdate(
+                                activity = this@MainActivity,
+                                launcher = playUpdateResultLauncher,
+                                onFallback = {
+                                    openUpdateDestination(this@MainActivity, blockingUpdate.updateUrl)
+                                }
+                            )
+                        },
+                        onStartFlexibleUpdate = {
+                            val fallbackUrl = optionalUpdate?.updateUrl
+                            playUpdateManager.startFlexibleUpdate(
+                                activity = this@MainActivity,
+                                launcher = playUpdateResultLauncher,
+                                onDownloaded = {
+                                    isFlexibleUpdateDownloaded = true
+                                },
+                                onFallback = {
+                                    openUpdateDestination(this@MainActivity, fallbackUrl)
+                                }
+                            )
+                        },
+                        onCompleteFlexibleUpdate = {
+                            playUpdateManager.completeUpdate()
+                        },
+                        onSendTestAlert = {
+                            viewModel.sendTestAlert { success, msg ->
+                                Toast.makeText(this@MainActivity, msg, Toast.LENGTH_LONG).show()
                             }
-                        )
-                    },
-                    onStartFlexibleUpdate = {
-                        val fallbackUrl = optionalUpdate?.updateUrl
-                        playUpdateManager.startFlexibleUpdate(
-                            activity = this@MainActivity,
-                            launcher = playUpdateResultLauncher,
-                            onDownloaded = {
-                                isFlexibleUpdateDownloaded = true
-                            },
-                            onFallback = {
-                                openUpdateDestination(this@MainActivity, fallbackUrl)
+                        },
+                        onFixAlerts = { vendor ->
+                            val notifGranted = androidx.core.app.NotificationManagerCompat.from(this@MainActivity).areNotificationsEnabled()
+                            if (!notifGranted) {
+                                requestNotificationPermissionOrOpenSettings()
+                            } else {
+                                viewModel.syncDeviceRegistration(vendor, takeOver = false)
+                                Toast.makeText(this@MainActivity, "Retrying alert registration...", Toast.LENGTH_SHORT).show()
                             }
-                        )
-                    },
-                    onCompleteFlexibleUpdate = {
-                        playUpdateManager.completeUpdate()
-                    },
-                    onSendTestAlert = {
-                        viewModel.sendTestAlert { success, msg ->
-                            Toast.makeText(this@MainActivity, msg, Toast.LENGTH_LONG).show()
-                        }
-                    },
-                    onFixAlerts = { vendor ->
-                        val notifGranted = androidx.core.app.NotificationManagerCompat.from(this@MainActivity).areNotificationsEnabled()
-                        if (!notifGranted) {
-                            requestNotificationPermissionOrOpenSettings()
-                        } else {
-                            viewModel.syncDeviceRegistration(vendor, takeOver = false)
-                            Toast.makeText(this@MainActivity, "Retrying alert registration...", Toast.LENGTH_SHORT).show()
-                        }
-                    },
-                    onRequestIgnoreBatteryOptimization = { requestIgnoreBatteryOptimization() },
-                    onDismissAutostartTip = { viewModel.dismissAutostartTip() },
-                    onOpenAppInfo = { openAppInfo() }
-                )
+                        },
+                        onRequestIgnoreBatteryOptimization = { requestIgnoreBatteryOptimization() },
+                        onDismissAutostartTip = { viewModel.dismissAutostartTip() },
+                        onOpenAppInfo = { openAppInfo() }
+                    )
+                }
             }
         }
     }
@@ -203,6 +213,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        // Re-check after the vendor returns from the system settings page.
+        isFullScreenPermissionRequired = NotificationHelper.isFullScreenPermissionRequired(this)
         val notifGranted = androidx.core.app.NotificationManagerCompat.from(this).areNotificationsEnabled()
         viewModel.updateNotificationPermissionStatus(notifGranted)
         checkBatteryOptimizationStatus()
@@ -228,6 +240,15 @@ class MainActivity : ComponentActivity() {
             startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
             Toast.makeText(this, "Select Sndmart Vendor and choose \"Don't optimize\"", Toast.LENGTH_LONG).show()
         } catch (e: Exception) {
+            openAppInfo()
+        }
+    }
+
+    private fun openFullScreenPermissionSettings() {
+        try {
+            startActivity(NotificationHelper.fullScreenSettingsIntent(this))
+        } catch (e: Exception) {
+            Toast.makeText(this, "Open Settings > Apps > Sndmart Vendor and allow full screen notifications", Toast.LENGTH_LONG).show()
             openAppInfo()
         }
     }

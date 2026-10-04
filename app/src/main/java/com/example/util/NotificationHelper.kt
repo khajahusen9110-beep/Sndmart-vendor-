@@ -6,6 +6,8 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.media.AudioAttributes
+import android.net.Uri
+import android.provider.Settings
 import android.media.MediaPlayer
 import android.os.Build
 import android.os.Handler
@@ -65,6 +67,22 @@ object NotificationHelper {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) return true
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
         return manager?.canUseFullScreenIntent() == true
+    }
+
+    /** System page where the user allows full-screen notifications for this app (Android 14+). */
+    fun fullScreenSettingsIntent(context: Context): Intent =
+        Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT).apply {
+            data = Uri.parse("package:${context.packageName}")
+        }
+
+    /**
+     * True when the app must ask for full-screen alerts before it can be used: Android 14+, the
+     * permission is off, and the phone has the settings page to turn it on (so nobody gets stuck).
+     */
+    fun isFullScreenPermissionRequired(context: Context): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) return false
+        if (canUseFullScreenIntent(context)) return false
+        return fullScreenSettingsIntent(context).resolveActivity(context.packageManager) != null
     }
 
     // Fallback alarm used only when the foreground alarm service cannot start.

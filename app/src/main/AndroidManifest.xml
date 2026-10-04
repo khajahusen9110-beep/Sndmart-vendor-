@@ -14,6 +14,13 @@
     <!-- Shows the new-order screen over the lock screen (Android 14+: user must allow it) -->
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
 
+    <!-- Lets the app check that the "full screen notifications" settings page exists -->
+    <queries>
+        <intent>
+            <action android:name="android.settings.MANAGE_APP_USE_FULL_SCREEN_INTENT" />
+        </intent>
+    </queries>
+
     <application
         android:name=".VendorApplication"
         android:allowBackup="false"
