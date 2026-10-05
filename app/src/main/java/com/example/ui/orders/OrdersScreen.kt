@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.Order
 import com.example.util.CurrencyFormatter
+import com.example.util.OrderAge
 import com.example.ui.components.OrderCardSkeleton
 import com.example.ui.components.StatusBadge
 import com.example.ui.theme.*
@@ -88,6 +89,19 @@ fun OrdersScreen(
                 (order.address?.address_line?.lowercase()?.contains(q) == true) ||
                 (order.deliveryAddress?.lowercase()?.contains(q) == true)
             }
+        }
+    }
+
+    // "New" = confirmed orders still waiting for the kitchen; shown first under their own header
+    val newOrders = remember(filteredOrders) { filteredOrders.filter { it.status?.lowercase() == "confirmed" } }
+    val otherOrders = remember(filteredOrders) { filteredOrders.filterNot { it.status?.lowercase() == "confirmed" } }
+
+    // Refreshes the "x min ago" label on new orders
+    var nowMillis by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(30_000)
+            nowMillis = System.currentTimeMillis()
         }
     }
 
@@ -286,7 +300,7 @@ fun OrdersScreen(
                     }
                 }
             } else {
-                items(filteredOrders, key = { it.id }) { order ->
+                val renderOrder: @Composable (Order) -> Unit = { order ->
                     val isConfirmed = order.status?.lowercase() == "confirmed"
                     val isPreparing = order.status?.lowercase() == "preparing"
 
@@ -294,8 +308,9 @@ fun OrdersScreen(
                         onClick = { onSelectOrder(order) },
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(20.dp),
-                        color = if (isConfirmed) SpruceContainerLight.copy(alpha = 0.45f) else PolishSurfaceLight,
-                        border = BorderStroke(1.dp, if (isConfirmed) SprucePrimary.copy(alpha = 0.35f) else PolishBorderLight)
+                        color = if (isConfirmed) PolishAmberLight else PolishSurfaceLight,
+                        border = if (isConfirmed) BorderStroke(2.dp, PolishAmber) else BorderStroke(1.dp, PolishBorderLight),
+                        shadowElevation = if (isConfirmed) 4.dp else 0.dp
                     ) {
                         Column(
                             modifier = Modifier
@@ -321,15 +336,24 @@ fun OrdersScreen(
                                     )
                                     if (isConfirmed) {
                                         Surface(
-                                            color = SprucePrimary,
+                                            color = PolishAmberDark,
                                             shape = RoundedCornerShape(6.dp)
                                         ) {
                                             Text(
-                                                text = "TO PREPARE",
+                                                text = "NEW",
                                                 color = Color.White,
                                                 fontSize = 10.sp,
                                                 fontWeight = FontWeight.ExtraBold,
                                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                        val age = OrderAge.label(OrderAge.minutesSince(order.createdAt, nowMillis))
+                                        if (age.isNotEmpty()) {
+                                            Text(
+                                                text = age,
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = PolishAmberDark
                                             )
                                         }
                                     }
@@ -553,6 +577,17 @@ fun OrdersScreen(
                             }
                         }
                     }
+                }
+                if (newOrders.isNotEmpty() && otherOrders.isNotEmpty()) {
+                    item(key = "header_new") { OrderSectionHeader("New orders", newOrders.size, isNew = true) }
+                    items(newOrders, key = { it.id }) { renderOrder(it) }
+                    item(key = "header_earlier") { OrderSectionHeader("Earlier orders", otherOrders.size, isNew = false) }
+                    items(otherOrders, key = { it.id }) { renderOrder(it) }
+                } else {
+                    if (newOrders.isNotEmpty() && state.activeFilter == "ALL") {
+                        item(key = "header_new") { OrderSectionHeader("New orders", newOrders.size, isNew = true) }
+                    }
+                    items(filteredOrders, key = { it.id }) { renderOrder(it) }
                 }
             }
 
@@ -930,6 +965,49 @@ fun OrdersScreen(
                 }
             },
             shape = RoundedCornerShape(24.dp)
+        )
+    }
+}
+
+@Composable
+private fun OrderSectionHeader(title: String, count: Int, isNew: Boolean) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        if (isNew) {
+            Box(
+                modifier = Modifier
+                    .size(10.dp)
+                    .clip(CircleShape)
+                    .background(PolishAmber)
+            )
+        }
+        Text(
+            text = title.uppercase(),
+            fontSize = 12.sp,
+            fontWeight = FontWeight.ExtraBold,
+            color = if (isNew) PolishAmberDark else Slate500,
+            letterSpacing = 0.8.sp
+        )
+        Surface(
+            color = if (isNew) PolishAmber else Slate200,
+            shape = RoundedCornerShape(10.dp)
+        ) {
+            Text(
+                text = count.toString(),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = if (isNew) Color.White else Slate700,
+                modifier = Modifier.padding(horizontal = 7.dp, vertical = 1.dp)
+            )
+        }
+        HorizontalDivider(
+            modifier = Modifier.weight(1f),
+            color = if (isNew) PolishAmber.copy(alpha = 0.4f) else PolishBorderLight
         )
     }
 }
