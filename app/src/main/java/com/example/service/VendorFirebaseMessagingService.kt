@@ -81,7 +81,7 @@ class VendorFirebaseMessagingService : FirebaseMessagingService() {
             }
         } else {
             // Order cancelled/rejected/ready, withdrawals, broadcasts: normal notification.
-            NotificationHelper.showGeneralNotification(this, orderId.hashCode(), title, body)
+            NotificationHelper.showGeneralNotification(this, orderId.hashCode(), title, body, imageUrl = data["image_url"])
         }
     }
 

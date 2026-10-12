@@ -131,7 +131,8 @@ object NotificationHelper {
         notificationId: Int,
         title: String,
         body: String,
-        targetTab: String = "orders"
+        targetTab: String = "orders",
+        imageUrl: String? = null
     ) {
         createNotificationChannels(context)
 
@@ -153,6 +154,7 @@ object NotificationHelper {
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)
+        NotificationVisuals.apply(context, builder, body, imageUrl)
 
         try {
             val notificationManager = NotificationManagerCompat.from(context)
@@ -195,6 +197,7 @@ object NotificationHelper {
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)
             .setSound(null)
+        NotificationVisuals.apply(context, builder, body, null)
 
         try {
             val notificationManager = NotificationManagerCompat.from(context)
