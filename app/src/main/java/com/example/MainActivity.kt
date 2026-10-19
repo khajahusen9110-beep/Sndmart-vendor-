@@ -59,8 +59,25 @@ class MainActivity : ComponentActivity() {
     private lateinit var playUpdateManager: PlayUpdateManager
     private var isFlexibleUpdateDownloaded by mutableStateOf(false)
 
-    // Android 14+: the app stays on the permission screen until full-screen alerts are allowed.
+    // Android 14+: the app shows the full-screen permission screen until alerts are allowed OR the
+    // vendor skips it once. After a skip it never hard-blocks again (they can enable it anytime from
+    // Profile → Full-Screen Alert); once actually granted, the screen disappears for good.
     private var isFullScreenPermissionRequired by mutableStateOf(false)
+    private var fullScreenPromptSkipped = false
+
+    private fun readFullScreenSkipped(): Boolean =
+        getSharedPreferences("sndmart_vendor_prefs", Context.MODE_PRIVATE)
+            .getBoolean("fullscreen_prompt_skipped", false)
+
+    private fun setFullScreenSkipped(value: Boolean) {
+        fullScreenPromptSkipped = value
+        getSharedPreferences("sndmart_vendor_prefs", Context.MODE_PRIVATE)
+            .edit().putBoolean("fullscreen_prompt_skipped", value).apply()
+    }
+
+    // The permission screen blocks only on the first run when it's required and not yet skipped.
+    private fun shouldGateFullScreen(): Boolean =
+        NotificationHelper.isFullScreenPermissionRequired(this) && !fullScreenPromptSkipped
 
     private val playUpdateResultLauncher = registerForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult()
@@ -85,14 +102,21 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         playUpdateManager = PlayUpdateManager(this)
-        isFullScreenPermissionRequired = NotificationHelper.isFullScreenPermissionRequired(this)
+        fullScreenPromptSkipped = readFullScreenSkipped()
+        isFullScreenPermissionRequired = shouldGateFullScreen()
         checkNotificationPermission()
         handleIntent(intent)
 
         setContent {
             SndmartVendorTheme {
                 if (isFullScreenPermissionRequired) {
-                    FullScreenPermissionScreen(onAllow = { openFullScreenPermissionSettings() })
+                    FullScreenPermissionScreen(
+                        onAllow = { openFullScreenPermissionSettings() },
+                        onSkip = {
+                            setFullScreenSkipped(true)
+                            isFullScreenPermissionRequired = false
+                        }
+                    )
                 } else {
                     val blockingUpdate by viewModel.blockingUpdateState.collectAsStateWithLifecycle()
                     val optionalUpdate by viewModel.optionalUpdateState.collectAsStateWithLifecycle()
@@ -214,7 +238,9 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         // Re-check after the vendor returns from the system settings page.
-        isFullScreenPermissionRequired = NotificationHelper.isFullScreenPermissionRequired(this)
+        // Once actually granted, clear the skip so Profile reflects the true state.
+        if (!NotificationHelper.isFullScreenPermissionRequired(this)) setFullScreenSkipped(false)
+        isFullScreenPermissionRequired = shouldGateFullScreen()
         val notifGranted = androidx.core.app.NotificationManagerCompat.from(this).areNotificationsEnabled()
         viewModel.updateNotificationPermissionStatus(notifGranted)
         checkBatteryOptimizationStatus()

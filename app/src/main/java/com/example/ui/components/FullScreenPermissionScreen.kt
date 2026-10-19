@@ -25,7 +25,8 @@ import com.example.ui.theme.*
 @Composable
 fun FullScreenPermissionScreen(
     onAllow: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onSkip: (() -> Unit)? = null
 ) {
     Column(
         modifier = modifier
@@ -90,6 +91,22 @@ fun FullScreenPermissionScreen(
             modifier = Modifier.fillMaxWidth()
         ) {
             Text("Allow", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        }
+        if (onSkip != null) {
+            Spacer(modifier = Modifier.height(6.dp))
+            TextButton(
+                onClick = onSkip,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Skip for now", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Slate600)
+            }
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = "You can turn this on anytime from Profile → Full-Screen Alert.",
+                fontSize = 11.sp,
+                color = Slate600,
+                textAlign = TextAlign.Center
+            )
         }
     }
 }
