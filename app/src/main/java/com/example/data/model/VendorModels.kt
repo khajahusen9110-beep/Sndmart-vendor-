@@ -210,6 +210,7 @@ data class Order(
     val commission_amount: Double? = null,
     val vendor_amount: Double? = null,
     val notes: String? = null,
+    val cooking_instructions: String? = null,
     val payment_status: String? = null,
     val payment_method: String? = null,
     val created_at: String? = null,
@@ -235,6 +236,7 @@ data class Order(
     val paymentMethod: String? get() = payment_method
     val createdAt: String? get() = created_at
     val orderItems: List<OrderItem>? get() = order_items
+    val cookingInstructions: String? get() = cooking_instructions?.takeIf { it.isNotBlank() }
 
     val customerName: String?
         get() = customer?.full_name?.takeIf { it.isNotBlank() } ?: "Customer"

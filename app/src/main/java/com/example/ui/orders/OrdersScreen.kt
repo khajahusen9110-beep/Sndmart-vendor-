@@ -714,6 +714,24 @@ fun OrdersScreen(
                         }
                     }
 
+                    // Cooking instructions from the customer (for the kitchen)
+                    order.cookingInstructions?.let { ci ->
+                        item {
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp),
+                                color = PolishAmberLight,
+                                border = BorderStroke(1.dp, PolishAmber)
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp)) {
+                                    Text("🍳 Cooking Instructions", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = PolishAmberDark)
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(ci, fontSize = 13.sp, color = Slate700)
+                                }
+                            }
+                        }
+                    }
+
                     // Order Items
                     item {
                         Text("Ordered Items", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Slate900)

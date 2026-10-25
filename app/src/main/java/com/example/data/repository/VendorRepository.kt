@@ -585,7 +585,7 @@ class VendorRepository(
                 val errorBodyStr = try { response.errorBody()?.string() } catch (_: Exception) { null }
                 if (errorBodyStr?.contains("orders_address_id_fkey") == true || errorBodyStr?.contains("customer_addresses") == true || errorBodyStr?.contains("relationship") == true || errorBodyStr?.contains("PGRST200") == true) {
                     android.util.Log.w("VendorRepository", "Address join not resolved, retrying without constraint hint: $errorBodyStr")
-                    val fallbackSelect = "id,order_number,status,subtotal,discount_amount,delivery_fee,handling_fee,total_amount,commission_amount,vendor_amount,notes,payment_status,payment_method,created_at,customer_id,address_id,order_items(id,product_name,quantity,unit_price,total_price),address:customer_addresses(address_line,landmark,recipient_name,phone)"
+                    val fallbackSelect = "id,order_number,status,subtotal,discount_amount,delivery_fee,handling_fee,total_amount,commission_amount,vendor_amount,notes,cooking_instructions,payment_status,payment_method,created_at,customer_id,address_id,order_items(id,product_name,quantity,unit_price,total_price),address:customer_addresses(address_line,landmark,recipient_name,phone)"
                     response = api.getOrders(
                         vendorIdFilter = "eq.$vendorId",
                         statusFilter = "in.(confirmed,preparing,ready,out_for_delivery,delivered,cancelled,rejected)",
@@ -596,7 +596,7 @@ class VendorRepository(
 
                     if (!response.isSuccessful && response.code() == 400) {
                         android.util.Log.w("VendorRepository", "Customer addresses join not resolved, retrying base query")
-                        val baseSelect = "id,order_number,status,subtotal,discount_amount,delivery_fee,handling_fee,total_amount,commission_amount,vendor_amount,notes,payment_status,payment_method,created_at,customer_id,address_id,order_items(id,product_name,quantity,unit_price,total_price)"
+                        val baseSelect = "id,order_number,status,subtotal,discount_amount,delivery_fee,handling_fee,total_amount,commission_amount,vendor_amount,notes,cooking_instructions,payment_status,payment_method,created_at,customer_id,address_id,order_items(id,product_name,quantity,unit_price,total_price)"
                         response = api.getOrders(
                             vendorIdFilter = "eq.$vendorId",
                             statusFilter = "in.(confirmed,preparing,ready,out_for_delivery,delivered,cancelled,rejected)",
