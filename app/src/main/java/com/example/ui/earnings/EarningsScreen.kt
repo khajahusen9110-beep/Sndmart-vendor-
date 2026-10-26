@@ -24,6 +24,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import android.widget.Toast
@@ -277,7 +278,8 @@ fun EarningsScreen(
                                     text = if (state.activeWithdrawalInProgress != null) "Under admin review" else "None pending",
                                     fontSize = 10.sp,
                                     color = Color.White.copy(alpha = 0.7f),
-                                    maxLines = 1
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
                         }
@@ -317,7 +319,8 @@ fun EarningsScreen(
                                     text = "Commission: ${state.commissionPercent.toInt()}% on payout",
                                     fontSize = 10.sp,
                                     color = Color.White.copy(alpha = 0.7f),
-                                    maxLines = 1
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
                         }
@@ -494,6 +497,7 @@ fun EarningsScreen(
                                 text = if (count > 0) "${tab.title} ($count)" else tab.title,
                                 fontSize = 13.sp,
                                 maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                                 fontWeight = if (activeSubTab == tab) FontWeight.Bold else FontWeight.Medium,
                                 color = if (activeSubTab == tab) SprucePrimary else Slate500
                             )

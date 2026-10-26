@@ -154,7 +154,9 @@ fun MenuScreen(
                     text = {
                         Text(
                             text = tab.title,
-                            fontWeight = if (activeSubTab == tab) FontWeight.Bold else FontWeight.Normal
+                            fontWeight = if (activeSubTab == tab) FontWeight.Bold else FontWeight.Normal,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 )
@@ -236,16 +238,22 @@ fun MenuScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Column {
+                            Column(
+                                modifier = Modifier.weight(1f).padding(end = 8.dp)
+                            ) {
                                 Text(
                                     text = if (state.errorMessage != null && state.products.isEmpty()) "Menu Catalog" else "${state.products.size} Items on Menu",
                                     style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                                 Text(
                                     text = "Manage your restaurant food catalog",
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
                             Button(
@@ -256,7 +264,7 @@ fun MenuScreen(
                             ) {
                                 Icon(imageVector = Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("Add Item", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                Text("Add Item", fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                         }
                     }
@@ -488,7 +496,7 @@ fun MenuScreen(
                                         },
                                         colors = ButtonDefaults.buttonColors(containerColor = SndmartOrange)
                                     ) {
-                                        Text(if (state.categories.isEmpty()) "Add Category First" else "Add Item")
+                                        Text(if (state.categories.isEmpty()) "Add Category First" else "Add Item", maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     }
                                 }
                             }
@@ -549,7 +557,9 @@ fun MenuScreen(
                                         Text(
                                             text = categoryName,
                                             style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
                                         )
                                         if (!product.description.isNullOrBlank()) {
                                             Text(
@@ -569,7 +579,9 @@ fun MenuScreen(
                                                 text = CurrencyFormatter.format(product.price),
                                                 style = MaterialTheme.typography.titleMedium,
                                                 fontWeight = FontWeight.Bold,
-                                                color = SndmartOrange
+                                                color = SndmartOrange,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
                                             )
                                             // Stock Badge
                                             if (product.isSoldOut) {
@@ -588,7 +600,9 @@ fun MenuScreen(
                                                             text = "Sold Out (0)",
                                                             color = Color(0xFFC62828),
                                                             fontSize = 10.sp,
-                                                            fontWeight = FontWeight.Bold
+                                                            fontWeight = FontWeight.Bold,
+                                                            maxLines = 1,
+                                                            overflow = TextOverflow.Ellipsis
                                                         )
                                                     }
                                                 }
@@ -610,7 +624,9 @@ fun MenuScreen(
                                                             text = if (isLow) "Low: $stock" else "Stock: $stock",
                                                             color = if (isLow) Color(0xFFE65100) else Color(0xFF1B5E20),
                                                             fontSize = 10.sp,
-                                                            fontWeight = FontWeight.SemiBold
+                                                            fontWeight = FontWeight.SemiBold,
+                                                            maxLines = 1,
+                                                            overflow = TextOverflow.Ellipsis
                                                         )
                                                     }
                                                 }
@@ -634,7 +650,7 @@ fun MenuScreen(
                                                 ),
                                                 modifier = Modifier.height(24.dp)
                                             ) {
-                                                Text("+100 Stock", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                                Text("+100 Stock", fontSize = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                             }
                                         }
                                         Row(
@@ -1790,9 +1806,9 @@ fun MenuScreen(
                             strokeWidth = 2.dp
                         )
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text(if (isUploadingProductPhoto) "Uploading Photo..." else "Saving...")
+                        Text(if (isUploadingProductPhoto) "Uploading Photo..." else "Saving...", maxLines = 1, overflow = TextOverflow.Ellipsis)
                     } else {
-                        Text(if (isEdit) "Save Item" else "Add Item")
+                        Text(if (isEdit) "Save Item" else "Add Item", maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
             },

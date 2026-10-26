@@ -16,6 +16,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.VendorBankDetails
@@ -68,7 +69,8 @@ fun PayoutAccountCard(
                             text = bankDetails.summary,
                             fontSize = 12.sp,
                             color = Slate700,
-                            maxLines = 1
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                         VerificationLabel(isVerified = bankDetails.isVerified)
                     }

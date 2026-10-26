@@ -1436,7 +1436,8 @@ private fun StepIndicator(
                         fontSize = 10.sp,
                         fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Medium,
                         color = if (isCurrent) SprucePrimary else if (isCompleted) Slate800 else Slate400,
-                        maxLines = 1
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
 

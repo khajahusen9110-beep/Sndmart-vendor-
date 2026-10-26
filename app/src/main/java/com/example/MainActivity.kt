@@ -108,6 +108,14 @@ class MainActivity : ComponentActivity() {
         handleIntent(intent)
 
         setContent {
+            val currentDensity = androidx.compose.ui.platform.LocalDensity.current
+            val clampedFontScale = currentDensity.fontScale.coerceIn(0.85f, 1.3f)
+            androidx.compose.runtime.CompositionLocalProvider(
+                androidx.compose.ui.platform.LocalDensity provides androidx.compose.ui.unit.Density(
+                    currentDensity.density,
+                    clampedFontScale
+                )
+            ) {
             SndmartVendorTheme {
                 if (isFullScreenPermissionRequired) {
                     FullScreenPermissionScreen(
@@ -169,6 +177,7 @@ class MainActivity : ComponentActivity() {
                         onOpenAppInfo = { openAppInfo() }
                     )
                 }
+            }
             }
         }
     }
