@@ -105,6 +105,17 @@ fun OrdersScreen(
         }
     }
 
+    // Beyond "New vs Earlier", group non-pending orders by day so a hotel owner can tell a
+    // fresh order from an old one at a glance, not just by its status badge.
+    val otherOrdersByDay = remember(otherOrders) {
+        val groups = LinkedHashMap<String, MutableList<Order>>()
+        otherOrders.forEach { order ->
+            val key = OrderAge.dateGroup(order.createdAt)
+            groups.getOrPut(key) { mutableListOf() }.add(order)
+        }
+        groups
+    }
+
     val listState = rememberLazyListState()
     val shouldLoadMore = remember {
         derivedStateOf {
@@ -359,7 +370,18 @@ fun OrdersScreen(
                                     }
                                 }
 
-                                StatusBadge(status = order.status ?: "pending")
+                                Column(horizontalAlignment = Alignment.End) {
+                                    StatusBadge(status = order.status ?: "pending")
+                                    val placedAt = OrderAge.timeLabel(order.createdAt)
+                                    if (placedAt.isNotEmpty()) {
+                                        Text(
+                                            text = placedAt,
+                                            fontSize = 11.sp,
+                                            color = Slate500,
+                                            modifier = Modifier.padding(top = 2.dp)
+                                        )
+                                    }
+                                }
                             }
 
                             val foodSubtotal = order.subtotal
@@ -582,7 +604,17 @@ fun OrdersScreen(
                     item(key = "header_new") { OrderSectionHeader("New orders", newOrders.size, isNew = true) }
                     items(newOrders, key = { it.id }) { renderOrder(it) }
                     item(key = "header_earlier") { OrderSectionHeader("Earlier orders", otherOrders.size, isNew = false) }
-                    items(otherOrders, key = { it.id }) { renderOrder(it) }
+                    otherOrdersByDay.forEach { (day, dayOrders) ->
+                        item(key = "day_$day") { OrderDayHeader(day) }
+                        items(dayOrders, key = { it.id }) { renderOrder(it) }
+                    }
+                } else if (otherOrders.isNotEmpty()) {
+                    // No pending "new" orders right now — still group the rest by day so a
+                    // fresh order never looks identical to an old, already-settled one.
+                    otherOrdersByDay.forEach { (day, dayOrders) ->
+                        item(key = "day_$day") { OrderDayHeader(day) }
+                        items(dayOrders, key = { it.id }) { renderOrder(it) }
+                    }
                 } else {
                     if (newOrders.isNotEmpty() && state.activeFilter == "ALL") {
                         item(key = "header_new") { OrderSectionHeader("New orders", newOrders.size, isNew = true) }
@@ -1027,6 +1059,27 @@ private fun OrderSectionHeader(title: String, count: Int, isNew: Boolean) {
             modifier = Modifier.weight(1f),
             color = if (isNew) PolishAmber.copy(alpha = 0.4f) else PolishBorderLight
         )
+    }
+}
+
+/** Lighter sub-header ("Today" / "Yesterday" / "Mon, 20 Oct") grouping orders within a status section by day. */
+@Composable
+private fun OrderDayHeader(day: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp, bottom = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text(
+            text = day.uppercase(),
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            color = Slate500,
+            letterSpacing = 0.6.sp
+        )
+        HorizontalDivider(modifier = Modifier.weight(1f), color = PolishBorderLight)
     }
 }
 
