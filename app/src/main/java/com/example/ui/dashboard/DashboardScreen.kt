@@ -206,51 +206,17 @@ fun DashboardScreen(
                             }
                         }
 
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            if (!state.isOrderAlertsOn) {
-                                Button(
-                                    onClick = onFixAlerts,
-                                    shape = RoundedCornerShape(12.dp),
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = PolishRoseDark,
-                                        contentColor = Color.White
-                                    ),
-                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
-                                ) {
-                                    Text("Fix", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                }
-                            }
-
+                        if (!state.isOrderAlertsOn) {
                             Button(
-                                onClick = onSendTestAlert,
-                                enabled = !state.isSendingTestAlert,
+                                onClick = onFixAlerts,
                                 shape = RoundedCornerShape(12.dp),
                                 colors = ButtonDefaults.buttonColors(
-                                    containerColor = if (state.isOrderAlertsOn) PolishEmeraldDark else Slate800,
+                                    containerColor = PolishRoseDark,
                                     contentColor = Color.White
                                 ),
                                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
                             ) {
-                                if (state.isSendingTestAlert) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(14.dp),
-                                        color = Color.White,
-                                        strokeWidth = 2.dp
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Sending...", fontSize = 12.sp)
-                                } else {
-                                    Icon(
-                                        imageVector = Icons.Default.VolumeUp,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(15.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Test alert", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                }
+                                Text("Fix", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
