@@ -1151,6 +1151,16 @@ class VendorRepository(
         } catch (_: Exception) { null }
     }
 
+    /** The shop's category (name + template), remembered on the phone so the app opens with the right screens at once. */
+    suspend fun getShopCategoryInfo(categoryId: String): StoreCategoryInfo? = withContext(Dispatchers.IO) {
+        try {
+            val res = api.getStoreCategoryInfo("eq.$categoryId")
+            val info = if (res.isSuccessful) res.body()?.firstOrNull() else null
+            if (info != null) sessionManager.saveShopCategory(info.id, info.template, info.name)
+            info
+        } catch (_: Exception) { null }
+    }
+
     suspend fun getStoreCategories(): Resource<List<StoreCategoryOption>> = withContext(Dispatchers.IO) {
         try {
             val res = api.getStoreCategories()

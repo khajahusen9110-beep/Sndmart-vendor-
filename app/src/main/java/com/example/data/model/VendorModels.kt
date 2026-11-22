@@ -113,7 +113,10 @@ data class Vendor(
     @Json(name = "food_license_url") val foodLicenseUrl: String? = null,
     @Json(name = "aadhar_document_url") val aadharDocumentUrl: String? = null,
     @Json(name = "is_featured") val isFeatured: Boolean? = false,
-    @Json(name = "created_at") val createdAt: String? = null
+    @Json(name = "created_at") val createdAt: String? = null,
+    // Shops: the confirmed category (decides which options the app shows) and the one asked for at registration
+    @Json(name = "store_category_id") val storeCategoryId: String? = null,
+    @Json(name = "requested_store_category_id") val requestedStoreCategoryId: String? = null
 )
 
 @JsonClass(generateAdapter = true)
@@ -540,4 +543,14 @@ data class ProductVariant(
     val price: Double = 0.0,
     @Json(name = "is_available") val isAvailable: Boolean = true,
     @Json(name = "is_active") val isActive: Boolean = true
+)
+
+
+@JsonClass(generateAdapter = true)
+data class StoreCategoryInfo(
+    val id: String = "",
+    val key: String = "",
+    val name: String = "",
+    @Json(name = "name_kn") val nameKn: String? = null,
+    val template: String? = null
 )

@@ -215,7 +215,7 @@ fun EarningsScreen(
                                 }
                             } else {
                                 Text(
-                                    text = "Food subtotal earned from delivered orders",
+                                    text = com.example.ui.LocalVendorLabels.current.subtotalEarned,
                                     fontSize = 11.sp,
                                     color = Color.White.copy(alpha = 0.7f)
                                 )

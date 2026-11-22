@@ -428,7 +428,7 @@ fun OrdersScreen(
                                         color = PolishEmeraldDark
                                     )
                                     Text(
-                                        text = if (hasFees) "Food (Total ${CurrencyFormatter.format(order.totalAmount)})" else "Food Subtotal",
+                                        text = if (hasFees) (if (com.example.ui.LocalVendorLabels.current.isHotel) "Food" else "Items") + " (Total ${CurrencyFormatter.format(order.totalAmount)})" else (if (com.example.ui.LocalVendorLabels.current.isHotel) "Food Subtotal" else "Items Subtotal"),
                                         fontSize = 10.5.sp,
                                         color = Slate500
                                     )
@@ -777,7 +777,7 @@ fun OrdersScreen(
                                 border = BorderStroke(1.dp, PolishAmber)
                             ) {
                                 Column(modifier = Modifier.padding(12.dp)) {
-                                    Text("🍳 Cooking Instructions", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = PolishAmberDark)
+                                    Text(com.example.ui.LocalVendorLabels.current.orderInstructions, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = PolishAmberDark)
                                     Spacer(modifier = Modifier.height(4.dp))
                                     Text(ci, fontSize = 13.sp, color = Slate700)
                                 }
@@ -864,7 +864,7 @@ fun OrdersScreen(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Text("Food Subtotal (Hotel):", fontSize = 13.sp, color = Slate700, fontWeight = FontWeight.SemiBold)
+                                Text(com.example.ui.LocalVendorLabels.current.itemsSubtotal, fontSize = 13.sp, color = Slate700, fontWeight = FontWeight.SemiBold)
                                 Text(CurrencyFormatter.format(detailFoodSubtotal), fontSize = 13.5.sp, fontWeight = FontWeight.Bold, color = PolishEmeraldDark)
                             }
                             if (deliveryFee > 0) {
@@ -923,7 +923,7 @@ fun OrdersScreen(
                                                 color = PolishEmeraldDark
                                             )
                                             Text(
-                                                text = "Food amount credited to hotel wallet upon delivery.",
+                                                text = com.example.ui.LocalVendorLabels.current.creditedNote,
                                                 fontSize = 11.sp,
                                                 color = PolishEmeraldDark.copy(alpha = 0.85f)
                                             )
@@ -950,7 +950,7 @@ fun OrdersScreen(
                                             modifier = Modifier.size(16.dp)
                                         )
                                         Text(
-                                            text = "Hotel Earning: ${CurrencyFormatter.format(detailFoodSubtotal)} will be credited to wallet when delivered.",
+                                            text = "${com.example.ui.LocalVendorLabels.current.earningLabel} ${CurrencyFormatter.format(detailFoodSubtotal)} will be credited to wallet when delivered.",
                                             fontSize = 11.5.sp,
                                             color = SpruceOnContainer
                                         )

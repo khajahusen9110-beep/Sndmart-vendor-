@@ -249,6 +249,28 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
     private val _sessionExpiredNotice = MutableStateFlow<String?>(sessionManager.sessionExpiredMessage)
     val sessionExpiredNotice: StateFlow<String?> = _sessionExpiredNotice.asStateFlow()
 
+    // Which screens and words this vendor gets: a hotel, or a shop of a given category template
+    private val _vendorLabels = MutableStateFlow(com.example.ui.VendorLabels())
+    val vendorLabels: StateFlow<com.example.ui.VendorLabels> = _vendorLabels.asStateFlow()
+
+    private fun updateVendorLabels(vendor: Vendor) {
+        if ((vendor.vendorType ?: "hotel").lowercase() == "hotel") {
+            _vendorLabels.value = com.example.ui.VendorLabels()
+            return
+        }
+        val catId = vendor.storeCategoryId ?: vendor.requestedStoreCategoryId
+        // what we remembered, shown at once (a shop with no category yet gets the standard product screens)
+        _vendorLabels.value = if (catId != null && catId == sessionManager.cachedShopCategoryId)
+            com.example.ui.VendorLabels.forShop(sessionManager.cachedShopCategoryTemplate, sessionManager.cachedShopCategoryName)
+        else com.example.ui.VendorLabels.forShop(null, null)
+        if (catId != null) {
+            viewModelScope.launch {
+                val info = repository.getShopCategoryInfo(catId) ?: return@launch
+                _vendorLabels.value = com.example.ui.VendorLabels.forShop(info.template, info.name)
+            }
+        }
+    }
+
     private var livePollingJob: Job? = null
     private var isAppInForeground = false
 
@@ -613,6 +635,7 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
 
         when (vendor.approvalStatus.lowercase(Locale.ROOT)) {
             "approved" -> {
+                updateVendorLabels(vendor)
                 _authUiState.value = AuthUiState.Authenticated(vendor)
                 _profileState.update { it.copy(vendor = vendor) }
                 _dashboardState.update { it.copy(isStoreOpen = vendor.isOpen) }

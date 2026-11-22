@@ -274,7 +274,7 @@ fun StoreProfileScreen(
                         OutlinedTextField(
                             value = name,
                             onValueChange = { name = it },
-                            label = { Text("Store / Hotel Name *") },
+                            label = { Text(com.example.ui.LocalVendorLabels.current.storeNameLabel) },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(12.dp)

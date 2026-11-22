@@ -45,6 +45,13 @@ interface SupabaseApi {
         @Query("scope") scope: String = "others"
     ): Response<Unit>
 
+    // One shop category (its template decides which options the vendor app shows)
+    @GET("rest/v1/store_categories")
+    suspend fun getStoreCategoryInfo(
+        @Query("id") idFilter: String,
+        @Query("select") select: String = "id,key,name,name_kn,template"
+    ): Response<List<StoreCategoryInfo>>
+
     // Shop categories a new shop can register under (public list of the active ones).
     @GET("rest/v1/store_categories")
     suspend fun getStoreCategories(

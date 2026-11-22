@@ -71,6 +71,14 @@ class SessionManager(context: Context) {
         sessionExpiredFlow.tryEmit(message)
     }
 
+    // The shop's category template, kept so the right screens show before the network answers
+    fun saveShopCategory(id: String, template: String?, name: String?) {
+        prefs.edit().putString("shop_cat_id", id).putString("shop_cat_template", template).putString("shop_cat_name", name).apply()
+    }
+    val cachedShopCategoryId: String? get() = prefs.getString("shop_cat_id", null)
+    val cachedShopCategoryTemplate: String? get() = prefs.getString("shop_cat_template", null)
+    val cachedShopCategoryName: String? get() = prefs.getString("shop_cat_name", null)
+
     var isSoundAlertEnabled: Boolean
         get() = prefs.getBoolean(KEY_SOUND_ALERT_ENABLED, true)
         set(value) = prefs.edit().putBoolean(KEY_SOUND_ALERT_ENABLED, value).apply()
@@ -180,6 +188,7 @@ class SessionManager(context: Context) {
             .remove(KEY_USER_EMAIL)
             .remove(KEY_VENDOR_DATA)
             .remove(KEY_TOKEN_EXPIRES_AT)
+            .remove("shop_cat_id").remove("shop_cat_template").remove("shop_cat_name")
             .apply()
     }
 }

@@ -85,6 +85,7 @@ fun MenuScreen(
     onSearchQueryChange: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    val labels = com.example.ui.LocalVendorLabels.current
     var activeSubTab by remember { mutableStateOf(MenuSectionTab.ITEMS) }
     var selectedCategoryFilter by remember { mutableStateOf<String?>(null) }
     var filterSoldOutOnly by remember { mutableStateOf(false) }
@@ -159,7 +160,7 @@ fun MenuScreen(
                     onClick = { activeSubTab = tab },
                     text = {
                         Text(
-                            text = tab.title,
+                            text = if (tab == MenuSectionTab.ITEMS) labels.itemsTab else tab.title,
                             fontWeight = if (activeSubTab == tab) FontWeight.Bold else FontWeight.Normal,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
@@ -248,14 +249,14 @@ fun MenuScreen(
                                 modifier = Modifier.weight(1f).padding(end = 8.dp)
                             ) {
                                 Text(
-                                    text = if (state.errorMessage != null && state.products.isEmpty()) "Menu Catalog" else "${state.products.size} Items on Menu",
+                                    text = if (state.errorMessage != null && state.products.isEmpty()) labels.catalogTitle else labels.itemsCount(state.products.size),
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Bold,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
                                 Text(
-                                    text = "Manage your restaurant food catalog",
+                                    text = labels.catalogSubtitle,
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     maxLines = 1,
@@ -280,7 +281,7 @@ fun MenuScreen(
                         OutlinedTextField(
                             value = localSearchText,
                             onValueChange = { localSearchText = it },
-                            placeholder = { Text("Search menu items...", fontSize = 13.sp) },
+                            placeholder = { Text(labels.searchHint, fontSize = 13.sp) },
                             leadingIcon = {
                                 Icon(imageVector = Icons.Default.Search, contentDescription = null, tint = Slate400, modifier = Modifier.size(18.dp))
                             },
@@ -444,7 +445,7 @@ fun MenuScreen(
                                     )
                                     Spacer(modifier = Modifier.height(12.dp))
                                     Text(
-                                        text = "Unable to load menu",
+                                        text = labels.loadFailed,
                                         fontWeight = FontWeight.Bold,
                                         style = MaterialTheme.typography.titleMedium,
                                         color = MaterialTheme.colorScheme.onErrorContainer
@@ -463,7 +464,7 @@ fun MenuScreen(
                                     ) {
                                         Icon(imageVector = Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
                                         Spacer(modifier = Modifier.width(6.dp))
-                                        Text("Retry Loading Menu")
+                                        Text(labels.retryLoad)
                                     }
                                 }
                             }
@@ -490,7 +491,7 @@ fun MenuScreen(
                                     )
                                     Spacer(modifier = Modifier.height(12.dp))
                                     Text(
-                                        text = if (state.categories.isEmpty()) "Add your first category and food items" else "No items in this category",
+                                        text = if (state.categories.isEmpty()) labels.emptyCategories else "No items in this category",
                                         fontWeight = FontWeight.SemiBold,
                                         color = MaterialTheme.colorScheme.onSurface
                                     )
@@ -751,12 +752,12 @@ fun MenuScreen(
                         ) {
                             Column {
                                 Text(
-                                    text = "Menu Categories (${state.categories.size})",
+                                    text = labels.categoriesTitle(state.categories.size),
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Bold
                                 )
                                 Text(
-                                    text = "Group food items into organized categories",
+                                    text = labels.categoriesHint,
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -1106,7 +1107,7 @@ fun MenuScreen(
                 }
             },
             title = {
-                Text(if (isEdit) "Edit Category" else "Add Menu Category", fontWeight = FontWeight.Bold, color = Slate900)
+                Text(if (isEdit) "Edit Category" else labels.addCategory, fontWeight = FontWeight.Bold, color = Slate900)
             },
             text = {
                 Column(
@@ -1322,7 +1323,8 @@ fun MenuScreen(
         var description by remember { mutableStateOf(editingProduct?.description ?: "") }
         var unitStr by remember { mutableStateOf(editingProduct?.unit?.takeIf { it != "piece" } ?: "") }
         // Made-to-order options (shops only)
-        var customOn by remember { mutableStateOf(editingProduct?.isCustomizable ?: false) }
+        // customised categories (bakery, gifts, frames, printing) start with the made-to-order options on
+        var customOn by remember { mutableStateOf(editingProduct?.isCustomizable ?: labels.allowsCustomisation) }
         var customNote by remember { mutableStateOf(editingProduct?.customAllowNote ?: true) }
         var customPhoto by remember { mutableStateOf(editingProduct?.customAllowPhoto ?: false) }
         var customLabel by remember { mutableStateOf(editingProduct?.customNoteLabel ?: "") }
@@ -1384,7 +1386,7 @@ fun MenuScreen(
                 }
             },
             title = {
-                Text(if (isEdit) "Edit Menu Item" else "Add New Menu Item", fontWeight = FontWeight.Bold, color = Slate900)
+                Text(labels.itemDialogTitle(isEdit), fontWeight = FontWeight.Bold, color = Slate900)
             },
             text = {
                 LazyColumn(
@@ -1528,7 +1530,7 @@ fun MenuScreen(
                             OutlinedTextField(
                                 value = unitStr,
                                 onValueChange = { unitStr = it; errorMsg = null },
-                                label = { Text("Quantity / Unit (e.g. 500 g, 1 kg, 1 litre)") },
+                                label = { Text(if (labels.unitFirst) "Unit * (e.g. 1 kg, 500 g, 1 dozen)" else "Quantity / Unit (e.g. 500 g, 1 kg, 1 litre)") },
                                 singleLine = true,
                                 colors = polishTextFieldColors(),
                                 modifier = Modifier.fillMaxWidth(),
@@ -1566,8 +1568,8 @@ fun MenuScreen(
                         }
                     }
 
-                    // Made-to-order options (shops only): the customer writes a message and/or adds a photo
-                    if (isShop) {
+                    // Made-to-order options: only for customised categories (or a product that already uses them)
+                    if (isShop && (labels.allowsCustomisation || customOn)) {
                         item {
                             Surface(shape = RoundedCornerShape(12.dp), color = PolishBackgroundLight, border = BorderStroke(1.dp, PolishBorderLight), modifier = Modifier.fillMaxWidth()) {
                                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1707,7 +1709,7 @@ fun MenuScreen(
                                                 color = Slate900
                                             )
                                             Text(
-                                                text = if (isUnlimitedStock) "Item stays orderable whenever kitchen is open (100 buffer)" else "Tracking exact portion count",
+                                                text = if (isUnlimitedStock) labels.stockOn else "Tracking exact portion count",
                                                 style = MaterialTheme.typography.bodySmall,
                                                 color = Slate500,
                                                 fontSize = 11.sp
@@ -1820,6 +1822,10 @@ fun MenuScreen(
                         val finalStock = stockQtyStr.toIntOrNull()
                         if (finalStock == null || finalStock < 0) {
                             errorMsg = "Please enter a valid stock quantity (0 or greater)"
+                            return@Button
+                        }
+                        if (isShop && labels.unitFirst && unitStr.isBlank()) {
+                            errorMsg = "Please enter the unit (for example 1 kg or 500 g)"
                             return@Button
                         }
                         if (isShop && customOn && !customNote && !customPhoto) {
@@ -1989,8 +1995,8 @@ fun MenuScreen(
 
     if (productToDelete != null) {
         ConfirmationDialog(
-            title = "Delete Menu Item",
-            message = "Are you sure you want to remove \"${productToDelete?.name}\" from your menu?",
+            title = labels.deleteTitle,
+            message = labels.deleteMessage(productToDelete?.name),
             confirmText = "Delete Item",
             isDestructive = true,
             onConfirm = {

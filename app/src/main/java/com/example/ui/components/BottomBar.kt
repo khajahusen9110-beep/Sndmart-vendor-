@@ -60,14 +60,14 @@ fun VendorBottomBar(
                         }
                     } else {
                         Icon(
-                            imageVector = if (selected) tab.selectedIcon else tab.unselectedIcon,
+                            imageVector = if (tab == VendorNavTab.MENU && com.example.ui.LocalVendorLabels.current.isShop) (if (selected) Icons.Filled.Inventory2 else Icons.Outlined.Inventory2) else if (selected) tab.selectedIcon else tab.unselectedIcon,
                             contentDescription = tab.title
                         )
                     }
                 },
                 label = {
                     Text(
-                        text = tab.title,
+                        text = if (tab == VendorNavTab.MENU) com.example.ui.LocalVendorLabels.current.navMenu else tab.title,
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = if (selected) androidx.compose.ui.text.font.FontWeight.Bold else androidx.compose.ui.text.font.FontWeight.Medium
                     )

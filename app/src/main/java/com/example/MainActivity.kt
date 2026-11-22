@@ -317,6 +317,31 @@ fun MainVendorApp(
     onOpenAppInfo: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    // Hotel or shop (and which kind of shop): every screen below reads its words and options from here.
+    val vendorLabels by viewModel.vendorLabels.collectAsStateWithLifecycle()
+    androidx.compose.runtime.CompositionLocalProvider(com.example.ui.LocalVendorLabels provides vendorLabels) {
+        MainVendorAppContent(
+            viewModel, initialTargetTab, isUpdateDownloaded, onUpdateNow, onStartFlexibleUpdate, onCompleteFlexibleUpdate,
+            onSendTestAlert, onFixAlerts, onRequestIgnoreBatteryOptimization, onDismissAutostartTip, onOpenAppInfo, modifier
+        )
+    }
+}
+
+@Composable
+private fun MainVendorAppContent(
+    viewModel: VendorViewModel,
+    initialTargetTab: String? = null,
+    isUpdateDownloaded: Boolean = false,
+    onUpdateNow: () -> Unit = {},
+    onStartFlexibleUpdate: () -> Unit = {},
+    onCompleteFlexibleUpdate: () -> Unit = {},
+    onSendTestAlert: () -> Unit = {},
+    onFixAlerts: (Vendor) -> Unit = {},
+    onRequestIgnoreBatteryOptimization: () -> Unit = {},
+    onDismissAutostartTip: () -> Unit = {},
+    onOpenAppInfo: () -> Unit = {},
+    modifier: Modifier = Modifier
+) {
     val authState by viewModel.authState.collectAsStateWithLifecycle()
     val dashboardState by viewModel.dashboardState.collectAsStateWithLifecycle()
     val menuState by viewModel.menuState.collectAsStateWithLifecycle()

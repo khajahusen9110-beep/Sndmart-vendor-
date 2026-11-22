@@ -85,7 +85,7 @@ fun LoginScreen(
             )
 
             Text(
-                text = "Hotel & Food Merchant Portal",
+                text = "Hotel, Shop & Merchant Portal",
                 style = MaterialTheme.typography.bodyMedium,
                 color = Slate500,
                 textAlign = TextAlign.Center
@@ -287,7 +287,7 @@ fun LoginScreen(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "Register Your Restaurant",
+                            text = "Register Your Hotel or Shop",
                             fontWeight = FontWeight.Bold,
                             fontSize = 14.sp
                         )
