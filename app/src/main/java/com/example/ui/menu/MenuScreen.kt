@@ -29,6 +29,8 @@ import coil.compose.AsyncImage
 import com.example.data.model.Category
 import com.example.data.model.Product
 import com.example.data.model.ProductCustomization
+import com.example.util.BulkImportResult
+import com.example.util.ProductSheetRow
 import com.example.data.model.ProductVariant
 import com.example.data.model.VariantInput
 import com.example.util.CurrencyFormatter
@@ -68,6 +70,7 @@ fun MenuScreen(
     state: MenuUiState,
     isShop: Boolean = false,
     loadVariants: suspend (String) -> List<ProductVariant> = { emptyList() },
+    onBulkImport: (rows: List<ProductSheetRow>, skipExisting: Boolean, onProgress: (done: Int, total: Int) -> Unit, onDone: (BulkImportResult) -> Unit) -> Unit = { _, _, _, done -> done(BulkImportResult(0, 0, 0, listOf("Import is not available"))) },
     onSaveVariants: (productId: String, rows: List<VariantInput>, onComplete: (Boolean, String?) -> Unit) -> Unit = { _, _, done -> done(true, null) },
     onAddCategory: (name: String, imageUrl: String, onComplete: (Boolean, String?) -> Unit) -> Unit,
     onUpdateCategory: (id: String, name: String, imageUrl: String, onComplete: (Boolean, String?) -> Unit) -> Unit,
@@ -105,6 +108,8 @@ fun MenuScreen(
     var categoryToDelete by remember { mutableStateOf<Category?>(null) }
 
     var showAddProductDialog by remember { mutableStateOf(false) }
+    var showQuickAdd by remember { mutableStateOf(false) }
+    var showBulkImport by remember { mutableStateOf(false) }
     var editingProduct by remember { mutableStateOf<Product?>(null) }
     var productToDelete by remember { mutableStateOf<Product?>(null) }
 
@@ -272,6 +277,18 @@ fun MenuScreen(
                                 Icon(imageVector = Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text("Add Item", fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
+                    }
+
+                    // Faster ways to fill a shop's catalogue: a photo + name + price, or a whole sheet at once
+                    if (isShop) item {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                            FilledTonalButton(onClick = { showQuickAdd = true }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(10.dp), contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp)) {
+                                Icon(Icons.Default.PhotoCamera, contentDescription = null, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(6.dp)); Text("Quick add", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            }
+                            FilledTonalButton(onClick = { showBulkImport = true }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(10.dp), contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp)) {
+                                Icon(Icons.Default.UploadFile, contentDescription = null, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(6.dp)); Text("Import sheet", fontSize = 13.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -1313,6 +1330,20 @@ fun MenuScreen(
     }
 
     // 2. Add / Edit Product Dialog
+    if (showQuickAdd) {
+        QuickAddProductSheet(
+            categories = state.categories, labels = labels,
+            onUploadImage = onUploadProductImage, onAddProduct = onAddProduct,
+            onDismiss = { showQuickAdd = false }
+        )
+    }
+    if (showBulkImport) {
+        BulkImportDialog(
+            existingCategories = state.categories, labels = labels,
+            onImport = onBulkImport, onDismiss = { showBulkImport = false }
+        )
+    }
+
     if (showAddProductDialog || editingProduct != null) {
         val isEdit = editingProduct != null
         val currentStock = editingProduct?.effectiveStock

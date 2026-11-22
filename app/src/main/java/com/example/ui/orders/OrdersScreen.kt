@@ -17,6 +17,7 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -858,6 +859,29 @@ fun OrdersScreen(
                                                         runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(photoUrl)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
                                                     }
                                                 )
+                                                val photoScope = rememberCoroutineScope()
+                                                val photoName = "SndmartOrder-${order.orderNumber ?: order.id.take(6)}"
+                                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                    OutlinedButton(
+                                                        onClick = {
+                                                            photoScope.launch {
+                                                                com.example.util.PhotoFiles.saveToGallery(context, photoUrl!!, photoName)
+                                                                    .onSuccess { Toast.makeText(context, "Photo saved in Gallery (SndmartVendor)", Toast.LENGTH_LONG).show() }
+                                                                    .onFailure { Toast.makeText(context, "Could not save the photo: ${it.message}", Toast.LENGTH_LONG).show() }
+                                                            }
+                                                        },
+                                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                                                    ) { Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(6.dp)); Text("Save photo", fontSize = 12.sp) }
+                                                    OutlinedButton(
+                                                        onClick = {
+                                                            photoScope.launch {
+                                                                com.example.util.PhotoFiles.share(context, photoUrl!!, photoName)
+                                                                    .onFailure { Toast.makeText(context, "Could not share the photo: ${it.message}", Toast.LENGTH_LONG).show() }
+                                                            }
+                                                        },
+                                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                                                    ) { Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(6.dp)); Text("Share", fontSize = 12.sp) }
+                                                }
                                                 Text("Tap the photo to open it full size", fontSize = 11.sp, color = Slate500)
                                             } else Text(if (photoFailed) "Photo could not be loaded" else "Loading photo...", fontSize = 12.sp, color = Slate500)
                                         }

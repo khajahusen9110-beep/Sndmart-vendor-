@@ -49,7 +49,8 @@ class SupabaseClient(private val sessionManager: SessionManager) {
                         .post(org.json.JSONObject().put("refresh_token", rt).toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
                         .header("apikey", anon).header("Authorization", "Bearer $anon")
                         .header("Content-Type", "application/json").header("Accept", "application/json").build()
-                    val client = OkHttpClient.Builder().connectTimeout(20, TimeUnit.SECONDS).readTimeout(20, TimeUnit.SECONDS).build()
+                    // no silent re-send: a replayed refresh request would use a token the server has already rotated
+                    val client = OkHttpClient.Builder().connectTimeout(20, TimeUnit.SECONDS).readTimeout(20, TimeUnit.SECONDS).retryOnConnectionFailure(false).build()
                     client.newCall(req).execute().use { response ->
                         val text = response.body?.string().orEmpty()
                         if (response.isSuccessful) {

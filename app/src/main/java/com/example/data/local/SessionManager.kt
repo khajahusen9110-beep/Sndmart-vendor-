@@ -54,16 +54,13 @@ class SessionManager(context: Context) {
     }
 
     fun updateTokens(newAccessToken: String, newRefreshToken: String? = null, expiresInSeconds: Long? = null) {
-        accessToken = newAccessToken
-        if (!newRefreshToken.isNullOrBlank()) {
-            refreshToken = newRefreshToken
-        }
-        if (expiresInSeconds != null && expiresInSeconds > 0) {
-            tokenExpiresAt = (System.currentTimeMillis() / 1000) + expiresInSeconds
-        } else {
-            // Default Supabase token expiry is 1 hour (3600 seconds)
-            tokenExpiresAt = (System.currentTimeMillis() / 1000) + 3600
-        }
+        val expiresAt = (System.currentTimeMillis() / 1000) + (if (expiresInSeconds != null && expiresInSeconds > 0) expiresInSeconds else 3600L)
+        // ONE synchronous write of all three values. The server rotates the refresh token the moment it answers; if the
+        // phone killed the app before the new token reached the disk, the next start would send the OLD token and the
+        // server would end the whole session ("Your session expired"). apply() is asynchronous, commit() is not.
+        val e = prefs.edit().putString(KEY_ACCESS_TOKEN, newAccessToken).putLong(KEY_TOKEN_EXPIRES_AT, expiresAt)
+        if (!newRefreshToken.isNullOrBlank()) e.putString(KEY_REFRESH_TOKEN, newRefreshToken)
+        e.commit()
     }
 
     fun notifySessionExpired(message: String = "Your session expired, please log in again") {

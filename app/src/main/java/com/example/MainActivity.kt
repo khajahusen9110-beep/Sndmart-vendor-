@@ -628,6 +628,7 @@ private fun MainVendorAppContent(
                                     MenuScreen(
                                         state = menuState,
                                         loadVariants = { id -> viewModel.loadProductVariants(id) },
+                                        onBulkImport = { rows, skip, progress, done -> viewModel.importProducts(rows, skip, progress, done) },
                                         onSaveVariants = { id, rows, done -> viewModel.saveProductVariants(id, rows, done) },
                                         isShop = (vendor.vendorType ?: "hotel") != "hotel",
                                         onAddCategory = { name, imageUrl, onComplete ->

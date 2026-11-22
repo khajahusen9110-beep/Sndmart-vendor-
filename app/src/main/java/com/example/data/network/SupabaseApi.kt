@@ -146,6 +146,11 @@ interface SupabaseApi {
         @Query("offset") offset: Int? = 0
     ): Response<List<Product>>
 
+    // Many products in one request (bulk import); every row carries the same keys
+    @POST("rest/v1/products")
+    @Headers("Prefer: return=minimal")
+    suspend fun createProductsBulk(@Body rows: List<Map<String, @JvmSuppressWildcards Any?>>): Response<okhttp3.ResponseBody>
+
     @POST("rest/v1/products")
     @Headers("Prefer: return=representation")
     suspend fun createProduct(

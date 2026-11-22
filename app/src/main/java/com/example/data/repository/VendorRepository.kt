@@ -551,6 +551,22 @@ class VendorRepository(
         }
     }
 
+    /** Every product name+unit the vendor already has (to skip duplicates when importing a sheet). */
+    suspend fun getExistingProductKeys(vendorId: String): Set<String> = withContext(Dispatchers.IO) {
+        try {
+            val res = api.getProducts(vendorIdFilter = "eq.$vendorId", select = "id,vendor_id,name,unit", limit = 3000, offset = 0)
+            (res.body() ?: emptyList()).map { it.name.trim().lowercase() + "|" + (it.unit ?: "").trim().lowercase().let { u -> if (u == "piece") "" else u } }.toSet()
+        } catch (_: Exception) { emptySet() }
+    }
+
+    /** Creates up to 50 products in one request. */
+    suspend fun createProductsBulk(rows: List<Map<String, Any?>>): Resource<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            val res = api.createProductsBulk(rows)
+            if (res.isSuccessful) Resource.Success(true) else Resource.Error(extractErrorMessage(res, "Could not add products"), res.code())
+        } catch (e: Exception) { Resource.Error(e.localizedMessage ?: "No internet connection") }
+    }
+
     suspend fun getProductVariants(productId: String): Resource<List<ProductVariant>> = withContext(Dispatchers.IO) {
         try {
             val res = api.getProductVariants("eq.$productId")

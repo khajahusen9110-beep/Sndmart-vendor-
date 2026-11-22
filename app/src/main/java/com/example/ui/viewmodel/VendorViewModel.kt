@@ -1254,6 +1254,86 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    /**
+     * Imports products read from a sheet: creates the categories that do not exist yet, skips products already in the
+     * catalogue (optional) and adds the rest 50 at a time. Progress and a final summary are reported back.
+     */
+    fun importProducts(
+        rows: List<com.example.util.ProductSheetRow>,
+        skipExisting: Boolean,
+        onProgress: (done: Int, total: Int) -> Unit,
+        onDone: (com.example.util.BulkImportResult) -> Unit
+    ) {
+        val vendorId = currentVendorId()
+        if (vendorId == null) { onDone(com.example.util.BulkImportResult(0, 0, rows.size, listOf("Please log in again."))); return }
+        val cityId = _profileState.value.vendor?.cityId ?: sessionManager.cachedVendor?.cityId
+        viewModelScope.launch {
+            val messages = ArrayList<String>()
+            var created = 0; var skipped = 0; var failed = 0
+            // 1) categories (matched by name, any letter case)
+            val catIds = HashMap<String, String>()
+            _menuState.value.categories.forEach { catIds[it.name.trim().lowercase()] = it.id }
+            val defaultImage = _profileState.value.vendor?.bannerUrl?.takeIf { it.isNotBlank() }
+                ?: _profileState.value.vendor?.logoUrl?.takeIf { it.isNotBlank() }
+                ?: "https://images.unsplash.com/photo-1542838132-92c53300491e?w=400"
+            for (name in rows.mapNotNull { it.category?.trim() }.filter { it.isNotEmpty() }.distinctBy { it.lowercase() }) {
+                if (catIds.containsKey(name.lowercase())) continue
+                when (val c = repository.createCategory(vendorId, name, defaultImage, cityId)) {
+                    is Resource.Success -> { catIds[name.lowercase()] = c.data.id; _menuState.update { it.copy(categories = it.categories + c.data) } }
+                    is Resource.Error -> messages.add("Category \"$name\" could not be created: ${c.message}")
+                    Resource.Loading -> {}
+                }
+            }
+            // 2) skip what is already there
+            val existing = if (skipExisting) repository.getExistingProductKeys(vendorId) else emptySet()
+            val toAdd = ArrayList<com.example.util.ProductSheetRow>()
+            for (r in rows) {
+                val key = r.name.trim().lowercase() + "|" + (r.unit ?: "").trim().lowercase()
+                if (skipExisting && key in existing) skipped++ else toAdd.add(r)
+            }
+            onProgress(skipped, rows.size)
+            // 3) add 50 at a time
+            var done = skipped
+            for (chunk in toAdd.chunked(50)) {
+                val body = chunk.map { r ->
+                    mapOf<String, Any?>(
+                        "vendor_id" to vendorId,
+                        "category_id" to r.category?.trim()?.lowercase()?.let { catIds[it] },
+                        "name" to r.name,
+                        "description" to r.description,
+                        "price" to r.price,
+                        "mrp" to r.mrp,
+                        "unit" to (r.unit ?: "piece"),
+                        "image_url" to r.imageUrl,
+                        "stock_qty" to (r.stock ?: 100),
+                        "min_order_qty" to (r.minOrderQty ?: 1),
+                        "is_active" to true,
+                        "is_available" to ((r.stock ?: 100) > 0)
+                    )
+                }
+                when (val res = repository.createProductsBulk(body)) {
+                    is Resource.Success -> created += chunk.size
+                    is Resource.Error -> {
+                        // one bad row must not lose the other 49: retry them one by one
+                        for ((i, row) in body.withIndex()) {
+                            when (val one = repository.createProductsBulk(listOf(row))) {
+                                is Resource.Success -> created++
+                                is Resource.Error -> { failed++; messages.add("Row ${chunk[i].rowNumber} (${chunk[i].name}): ${one.message}") }
+                                Resource.Loading -> {}
+                            }
+                        }
+                    }
+                    Resource.Loading -> {}
+                }
+                done += chunk.size
+                onProgress(done.coerceAtMost(rows.size), rows.size)
+            }
+            repository.invalidateLiveData()
+            loadMenu(vendorId, forceRefresh = true)
+            onDone(com.example.util.BulkImportResult(created, skipped, failed, messages))
+        }
+    }
+
     suspend fun loadProductVariants(productId: String): List<ProductVariant> =
         (repository.getProductVariants(productId) as? Resource.Success)?.data.orEmpty()
 
