@@ -529,7 +529,10 @@ class VendorRepository(
             )
             if (!categoryId.isNullOrEmpty()) body["category_id"] = categoryId
             if (!unit.isNullOrBlank()) body["unit"] = unit.trim()
-            if (custom != null && custom.enabled) body.putAll(custom.toMap())
+            if (custom != null) {
+                body.putAll(custom.shopMap().filterValues { it != null }) // offer price and minimum quantity
+                if (custom.enabled) body.putAll(custom.toMap())
+            }
             if (!description.isNullOrEmpty()) body["description"] = description.trim()
             if (!imageUrl.isNullOrEmpty()) body["image_url"] = imageUrl.trim()
             if (!availableFrom.isNullOrEmpty()) body["available_from"] = availableFrom

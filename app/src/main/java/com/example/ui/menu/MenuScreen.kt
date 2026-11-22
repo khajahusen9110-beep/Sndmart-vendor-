@@ -1352,7 +1352,15 @@ fun MenuScreen(
             val pr = r.price.toDoubleOrNull()
             if (r.label.isBlank() || pr == null || pr <= 0) null else VariantInput(r.id, r.label.trim(), pr)
         }
-        val customization = ProductCustomization(customOn, customNote, customPhoto, customLabel, customRequired, customLeadStr.toIntOrNull() ?: 0, if (isShop && variantsLoaded) variantInputs else null)
+        // Offer (MRP), minimum order and customisation charge (shops only)
+        var mrpStr by remember { mutableStateOf(editingProduct?.mrp?.let { it.toString().removeSuffix(".0") } ?: "") }
+        var minQtyStr by remember { mutableStateOf((editingProduct?.minOrderQty ?: 1).let { if (it > 1) it.toString() else "" }) }
+        var extraStr by remember { mutableStateOf((editingProduct?.customExtraCharge ?: 0.0).let { if (it > 0) it.toString().removeSuffix(".0") else "" }) }
+        val customization = ProductCustomization(
+            customOn, customNote, customPhoto, customLabel, customRequired, customLeadStr.toIntOrNull() ?: 0,
+            if (isShop && variantsLoaded) variantInputs else null,
+            extraStr.toDoubleOrNull() ?: 0.0, mrpStr.toDoubleOrNull(), minQtyStr.toIntOrNull() ?: 1
+        )
         var imageUrl by remember { mutableStateOf(editingProduct?.imageUrl ?: "") }
         var selectedProductPhoto by remember { mutableStateOf<SelectedImageFile?>(null) }
         var isUploadingProductPhoto by remember { mutableStateOf(false) }
@@ -1541,6 +1549,33 @@ fun MenuScreen(
                         }
                     }
 
+                    // Offer and minimum order (shops only)
+                    if (isShop) {
+                        item {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                val basePrice = if (variantInputs.isNotEmpty()) variantInputs.minOf { it.price } else priceStr.toDoubleOrNull()
+                                val mrpVal = mrpStr.toDoubleOrNull()
+                                OutlinedTextField(
+                                    value = mrpStr, onValueChange = { mrpStr = it.filter { c -> c.isDigit() || c == '.' }; errorMsg = null },
+                                    label = { Text("Original price / MRP ₹ (optional, for an offer)") },
+                                    supportingText = {
+                                        if (mrpVal != null && basePrice != null && mrpVal > basePrice) Text("Customers see ${"%.0f".format((mrpVal - basePrice) * 100 / mrpVal)}% OFF", color = SprucePrimary)
+                                        else Text("Set it higher than the selling price to show a discount")
+                                    },
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true, colors = polishTextFieldColors(),
+                                    modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp)
+                                )
+                                OutlinedTextField(
+                                    value = minQtyStr, onValueChange = { minQtyStr = it.filter { c -> c.isDigit() }.take(4); errorMsg = null },
+                                    label = { Text("Minimum order quantity (optional)") }, placeholder = { Text("1") },
+                                    supportingText = { Text("e.g. 5 if you only sell this in 5s. Leave empty for no minimum.") },
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, colors = polishTextFieldColors(),
+                                    modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp)
+                                )
+                            }
+                        }
+                    }
+
                     // Sizes / options (shops only): e.g. 500 g / 1 kg, S / M / L, Red / Blue; each with its own price
                     if (isShop) {
                         item {
@@ -1595,6 +1630,12 @@ fun MenuScreen(
                                             value = customLeadStr, onValueChange = { customLeadStr = it.filter { ch -> ch.isDigit() }.take(3) },
                                             label = { Text("Notice needed (hours, 0 = none)") }, placeholder = { Text("e.g. 24 for a cake") },
                                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, colors = polishTextFieldColors(),
+                                            modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp)
+                                        )
+                                        OutlinedTextField(
+                                            value = extraStr, onValueChange = { extraStr = it.filter { ch -> ch.isDigit() || ch == '.' }; errorMsg = null },
+                                            label = { Text("Extra charge for customising ₹ (per piece, optional)") }, placeholder = { Text("e.g. 50 for a photo print") },
+                                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true, colors = polishTextFieldColors(),
                                             modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp)
                                         )
                                         if (!customNote && !customPhoto) Text("Choose at least a message or a photo.", fontSize = 11.sp, color = MaterialTheme.colorScheme.error)
@@ -1826,6 +1867,10 @@ fun MenuScreen(
                             errorMsg = "Please enter a valid stock quantity (0 or greater)"
                             return@Button
                         }
+                        if (isShop && mrpStr.isNotBlank() && (mrpStr.toDoubleOrNull() == null || mrpStr.toDouble() <= price)) {
+                            errorMsg = "The original price (MRP) must be higher than the selling price, or leave it empty"
+                            return@Button
+                        }
                         if (isShop && labels.unitFirst && unitStr.isBlank()) {
                             errorMsg = "Please enter the unit (for example 1 kg or 500 g)"
                             return@Button
@@ -1858,7 +1903,7 @@ fun MenuScreen(
                                         )
                                         if (categoryId != null) updates["category_id"] = categoryId
                                         if (isShop) updates["unit"] = unitStr.trim().ifBlank { "piece" }
-                                        if (isShop) updates.putAll(customization.toMap())
+                                        if (isShop) { updates.putAll(customization.toMap()); updates.putAll(customization.shopMap()) }
                                         updates["description"] = description.ifBlank { null }
 
                                         onUpdateProduct(editingProduct!!.id, updates) { pSuccess, pErr ->
@@ -1911,7 +1956,7 @@ fun MenuScreen(
                                 )
                                 if (categoryId != null) updates["category_id"] = categoryId
                                 if (isShop) updates["unit"] = unitStr.trim().ifBlank { "piece" }
-                                if (isShop) updates.putAll(customization.toMap())
+                                if (isShop) { updates.putAll(customization.toMap()); updates.putAll(customization.shopMap()) }
                                 updates["description"] = description.ifBlank { null }
                                 updates["image_url"] = imageUrl.ifBlank { null }
 

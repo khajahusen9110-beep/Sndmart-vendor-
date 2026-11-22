@@ -161,7 +161,9 @@ data class Product(
     @Json(name = "custom_allow_photo") val customAllowPhoto: Boolean = false,
     @Json(name = "custom_note_label") val customNoteLabel: String? = null,
     @Json(name = "custom_required") val customRequired: Boolean = false,
-    @Json(name = "custom_lead_hours") val customLeadHours: Int = 0
+    @Json(name = "custom_lead_hours") val customLeadHours: Int = 0,
+    @Json(name = "custom_extra_charge") val customExtraCharge: Double = 0.0,
+    @Json(name = "min_order_qty") val minOrderQty: Int = 1
 ) {
     val effectiveStock: Int get() = stockQty ?: stockQuantity ?: 0
     val isSoldOut: Boolean get() = effectiveStock <= 0
@@ -524,15 +526,25 @@ data class ProductCustomization(
     val required: Boolean = false,
     val leadHours: Int = 0,
     /** Sizes / options with their own price (null = leave the product's variants untouched) */
-    val variants: List<VariantInput>? = null
+    val variants: List<VariantInput>? = null,
+    /** Extra charge per piece when the customer customises (message / photo) */
+    val extraCharge: Double = 0.0,
+    /** Original price (MRP) for an offer: the app shows the discount. null = no offer */
+    val mrp: Double? = null,
+    /** Smallest quantity a customer can order */
+    val minOrderQty: Int = 1
 ) {
+    /** Shop rules that apply to every shop product, customisable or not */
+    fun shopMap(): Map<String, Any?> = mapOf("mrp" to mrp, "min_order_qty" to minOrderQty.coerceIn(1, 1000))
+
     fun toMap(): Map<String, Any?> = mapOf(
         "is_customizable" to enabled,
         "custom_allow_note" to allowNote,
         "custom_allow_photo" to allowPhoto,
         "custom_note_label" to noteLabel?.trim()?.ifBlank { null },
         "custom_required" to required,
-        "custom_lead_hours" to leadHours.coerceIn(0, 168)
+        "custom_lead_hours" to leadHours.coerceIn(0, 168),
+        "custom_extra_charge" to extraCharge.coerceAtLeast(0.0)
     )
 }
 

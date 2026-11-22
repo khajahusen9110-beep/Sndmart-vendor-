@@ -140,7 +140,7 @@ interface SupabaseApi {
     @GET("rest/v1/products")
     suspend fun getProducts(
         @Query("vendor_id") vendorIdFilter: String,
-        @Query("select") select: String = "id,vendor_id,category_id,name,description,price,unit,image_url,is_active,stock_qty,is_available,available_from,available_until,created_at,is_customizable,custom_allow_note,custom_allow_photo,custom_note_label,custom_required,custom_lead_hours",
+        @Query("select") select: String = "id,vendor_id,category_id,name,description,price,unit,image_url,is_active,stock_qty,is_available,available_from,available_until,created_at,is_customizable,custom_allow_note,custom_allow_photo,custom_note_label,custom_required,custom_lead_hours,custom_extra_charge,min_order_qty,mrp",
         @Query("order") order: String = "created_at.desc",
         @Query("limit") limit: Int? = 30,
         @Query("offset") offset: Int? = 0
