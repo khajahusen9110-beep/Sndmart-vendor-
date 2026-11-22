@@ -1458,13 +1458,18 @@ class VendorRepository(
         mimeType: String
     ): Resource<String> = withContext(Dispatchers.IO) {
         try {
-            val relativePath = "$vendorId/$fileName"
-            val requestBody = fileBytes.toRequestBody(mimeType.toMediaTypeOrNull())
+            // Every vendor photo (product, category, shop banner) is brought to about 20 KB before it leaves the phone,
+            // whatever its original size or type. The saved picture is always a JPEG.
+            val packed = com.example.util.ImageCompressor.compress(fileBytes)
+                ?: return@withContext Resource.Error("This file is not a readable photo. Please choose a JPG, PNG or WebP picture.")
+            val storedName = fileName.substringBeforeLast('.', fileName) + ".jpg"
+            val relativePath = "$vendorId/$storedName"
+            val requestBody = packed.bytes.toRequestBody("image/jpeg".toMediaTypeOrNull())
             val response = api.uploadStorageObject(
                 bucket = bucketName,
                 path = relativePath,
                 fileBytes = requestBody,
-                contentType = mimeType
+                contentType = "image/jpeg"
             )
             if (response.isSuccessful) {
                 val baseUrl = SupabaseClient.resolveBaseUrl()

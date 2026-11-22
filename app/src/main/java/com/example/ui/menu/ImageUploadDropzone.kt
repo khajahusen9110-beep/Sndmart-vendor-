@@ -72,10 +72,10 @@ fun parseImageUri(context: Context, uri: Uri, fallbackPrefix: String = "image"):
         }
 
         // 5MB client-side cap limit (checked before reading the file into memory when the size is known)
-        val maxSizeBytes = 5 * 1024 * 1024L
+        val maxSizeBytes = 25 * 1024 * 1024L // the photo is shrunk to about 20 KB when it is uploaded, so a big camera photo is fine
         if (fileSize > maxSizeBytes) {
             val sizeMb = String.format(Locale.US, "%.1f", fileSize / (1024.0 * 1024.0))
-            return Pair(null, "File is too large ($sizeMb MB). Maximum allowed size is 5 MB.")
+            return Pair(null, "File is too large ($sizeMb MB). Maximum allowed size is 25 MB.")
         }
 
         val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
@@ -85,7 +85,7 @@ fun parseImageUri(context: Context, uri: Uri, fallbackPrefix: String = "image"):
 
         if (bytes.size > maxSizeBytes) {
             val sizeMb = String.format(Locale.US, "%.1f", (if (fileSize > 0) fileSize else bytes.size.toLong()) / (1024.0 * 1024.0))
-            return Pair(null, "File is too large ($sizeMb MB). Maximum allowed size is 5 MB.")
+            return Pair(null, "File is too large ($sizeMb MB). Maximum allowed size is 25 MB.")
         }
 
         val mimeType = context.contentResolver.getType(uri) ?: when {
@@ -189,7 +189,7 @@ fun ImageUploadDropzone(
             }
 
             Text(
-                text = "Max 5MB (JPG, PNG, WebP)",
+                text = "Any size (JPG, PNG, WebP). Auto-compressed to ~20 KB",
                 style = MaterialTheme.typography.labelSmall,
                 color = Slate500
             )
@@ -347,7 +347,7 @@ fun ImageUploadDropzone(
                         }
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "JPG, PNG, WebP • Max 5MB",
+                            text = "JPG, PNG, WebP • Auto-compressed to ~20 KB",
                             style = MaterialTheme.typography.bodySmall,
                             color = Slate500,
                             fontSize = 11.sp
