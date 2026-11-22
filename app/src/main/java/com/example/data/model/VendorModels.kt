@@ -482,3 +482,13 @@ data class TestAlertResponse(
 )
 
 
+
+
+/** A shop category a new shop can register under (Kirana, Vegetables & Fruits, Bakery ...). The City Admin confirms it. */
+@JsonClass(generateAdapter = true)
+data class StoreCategoryOption(
+    val id: String = "",
+    val key: String = "",
+    val name: String = "",
+    @Json(name = "name_kn") val nameKn: String? = null
+)

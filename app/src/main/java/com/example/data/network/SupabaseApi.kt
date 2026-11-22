@@ -37,6 +37,14 @@ interface SupabaseApi {
         @Query("scope") scope: String = "others"
     ): Response<Unit>
 
+    // Shop categories a new shop can register under (public list of the active ones).
+    @GET("rest/v1/store_categories")
+    suspend fun getStoreCategories(
+        @Query("select") select: String = "id,key,name,name_kn",
+        @Query("is_active") isActive: String = "eq.true",
+        @Query("order") order: String = "sort_order.asc"
+    ): Response<List<StoreCategoryOption>>
+
     // 1.1 Cities table - matching exact query: .from('cities').select('id, name').eq('status', 'active').order('name')
     @GET("rest/v1/cities")
     suspend fun getCities(

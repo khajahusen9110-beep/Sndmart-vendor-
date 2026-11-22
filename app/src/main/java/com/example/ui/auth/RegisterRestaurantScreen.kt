@@ -40,6 +40,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import com.example.data.model.City
+import com.example.data.model.StoreCategoryOption
 import com.example.data.model.SelectedDocument
 import com.example.data.model.Vendor
 import com.example.ui.components.GoogleMapLocationPicker
@@ -70,6 +71,10 @@ fun RegisterRestaurantScreen(
     // 4. City
     var selectedCity by remember { mutableStateOf<City?>(null) }
     var cityDropdownExpanded by remember { mutableStateOf(false) }
+    // Hotel / Restaurant or a Shop (Dukan); a shop also picks its category (the City Admin confirms it).
+    var isShop by remember { mutableStateOf(false) }
+    var selectedShopCategory by remember { mutableStateOf<StoreCategoryOption?>(null) }
+    var shopCategoryExpanded by remember { mutableStateOf(false) }
     // 5. Exact Hotel Location (lat/lng)
     var latitude by remember { mutableStateOf(19.0760) }
     var longitude by remember { mutableStateOf(72.8777) }
@@ -103,6 +108,7 @@ fun RegisterRestaurantScreen(
     // Load active cities once
     LaunchedEffect(Unit) {
         viewModel.loadCities()
+        viewModel.loadStoreCategories()
     }
 
     // Default city selection when cities arrive
@@ -321,7 +327,7 @@ fun RegisterRestaurantScreen(
                     // Allow navigating back or forward only if previous requirements are met
                     if (targetStep < currentStep) {
                         currentStep = targetStep
-                    } else if (targetStep == 2 && ownerName.isNotBlank() && hotelName.isNotBlank() && whatsappNumber.isNotBlank() && selectedCity != null) {
+                    } else if (targetStep == 2 && ownerName.isNotBlank() && hotelName.isNotBlank() && whatsappNumber.isNotBlank() && selectedCity != null && (!isShop || selectedShopCategory != null)) {
                         currentStep = 2
                     } else if (targetStep == 3 && address.isNotBlank()) {
                         currentStep = 3
@@ -336,8 +342,25 @@ fun RegisterRestaurantScreen(
                 SectionCard(
                     stepNumber = "1",
                     title = "Owner & Store Details",
-                    subtitle = "Basic information about your restaurant"
+                    subtitle = if (isShop) "Basic information about your shop" else "Basic information about your restaurant"
                 ) {
+                    // 0. What are you registering?
+                    Text("I am registering a", fontWeight = FontWeight.SemiBold, color = Slate900)
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                        listOf(false to "🍽️ Hotel / Restaurant", true to "🏪 Shop (Dukan)").forEach { (shop, label) ->
+                            val on = isShop == shop
+                            OutlinedButton(
+                                onClick = { isShop = shop; formValidationMessage = null },
+                                modifier = Modifier.weight(1f).height(52.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    containerColor = if (on) SprucePrimary else Color.Transparent,
+                                    contentColor = if (on) Color.White else Slate900
+                                )
+                            ) { Text(label, fontWeight = FontWeight.Bold, fontSize = 13.sp) }
+                        }
+                    }
+
                     // 1. Owner Name
                     OutlinedTextField(
                         value = ownerName,
@@ -365,7 +388,7 @@ fun RegisterRestaurantScreen(
                             hotelName = it
                             formValidationMessage = null
                         },
-                        label = { Text("2. Hotel / Restaurant Name *") },
+                        label = { Text(if (isShop) "2. Shop Name *" else "2. Hotel / Restaurant Name *") },
                         placeholder = { Text("e.g. Spice Route Hotel & Kitchen", color = Slate400) },
                         leadingIcon = {
                             Icon(imageVector = Icons.Default.Storefront, contentDescription = null, tint = Slate400)
@@ -522,6 +545,40 @@ fun RegisterRestaurantScreen(
                         }
                     }
 
+                    if (isShop) {
+                        ExposedDropdownMenuBox(
+                            expanded = shopCategoryExpanded,
+                            onExpandedChange = { shopCategoryExpanded = !shopCategoryExpanded }
+                        ) {
+                            OutlinedTextField(
+                                value = selectedShopCategory?.name
+                                    ?: if (registrationState.isLoadingStoreCategories) "Loading categories..." else "Select Shop Category *",
+                                onValueChange = {},
+                                readOnly = true,
+                                colors = polishTextFieldColors(),
+                                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = shopCategoryExpanded) },
+                                leadingIcon = { Icon(imageVector = Icons.Default.Storefront, contentDescription = null, tint = Slate400) },
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.menuAnchor().fillMaxWidth()
+                            )
+                            ExposedDropdownMenu(expanded = shopCategoryExpanded, onDismissRequest = { shopCategoryExpanded = false }) {
+                                if (registrationState.storeCategories.isEmpty()) {
+                                    DropdownMenuItem(
+                                        text = { Text("No categories yet. Tap to reload.", color = Slate500) },
+                                        onClick = { viewModel.loadStoreCategories(); shopCategoryExpanded = false }
+                                    )
+                                } else {
+                                    registrationState.storeCategories.forEach { c ->
+                                        DropdownMenuItem(
+                                            text = { Text(if (!c.nameKn.isNullOrBlank()) "${c.name} · ${c.nameKn}" else c.name, color = Slate900) },
+                                            onClick = { selectedShopCategory = c; shopCategoryExpanded = false; formValidationMessage = null }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     Spacer(modifier = Modifier.height(12.dp))
 
                     Button(
@@ -541,6 +598,10 @@ fun RegisterRestaurantScreen(
                             }
                             if (selectedCity == null) {
                                 formValidationMessage = "Please select a City from the dropdown."
+                                return@Button
+                            }
+                            if (isShop && selectedShopCategory == null) {
+                                formValidationMessage = "Please select your Shop Category."
                                 return@Button
                             }
                             formValidationMessage = null
@@ -1117,7 +1178,7 @@ fun RegisterRestaurantScreen(
 
                     // 8. Food License Upload
                     Text(
-                        text = "8. Food License (FSSAI / Municipal Permit) *",
+                        text = if (isShop) "8. Shop License (Trade / GST / FSSAI if food) *" else "8. Food License (FSSAI / Municipal Permit) *",
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.SemiBold,
                         color = Slate800
@@ -1251,7 +1312,7 @@ fun RegisterRestaurantScreen(
                                 return@Button
                             }
                             if (foodLicenseDoc == null && registrationState.foodLicenseStoragePath.isNullOrBlank()) {
-                                formValidationMessage = "Please select your Food License document."
+                                formValidationMessage = "Please select your license document."
                                 return@Button
                             }
                             if (aadharDoc == null && registrationState.aadharStoragePath.isNullOrBlank()) {
@@ -1273,7 +1334,9 @@ fun RegisterRestaurantScreen(
                                 closingTime = closingTime,
                                 email = email,
                                 foodLicenseDoc = foodLicenseDoc,
-                                aadharDoc = aadharDoc
+                                aadharDoc = aadharDoc,
+                                vendorType = if (isShop) "grocery" else "hotel",
+                                requestedStoreCategoryId = if (isShop) selectedShopCategory?.id else null
                             ) { success, errorMsg, _ ->
                                 if (!success) {
                                     formValidationMessage = errorMsg ?: "Vendor registration failed. Please review details."

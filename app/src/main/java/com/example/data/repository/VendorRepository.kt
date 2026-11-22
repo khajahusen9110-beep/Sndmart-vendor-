@@ -406,7 +406,8 @@ class VendorRepository(
                 "slug" to slug,
                 "image_url" to cleanImageUrl,
                 "vendor_id" to vendorId,
-                "vendor_type" to "hotel",
+                // a shop keeps its own product categories under its own type (hotel stays "hotel")
+                "vendor_type" to (sessionManager.cachedVendor?.vendorType?.takeIf { it.isNotBlank() } ?: "hotel"),
                 "sort_order" to 0,
                 "is_active" to true
             )
@@ -438,8 +439,7 @@ class VendorRepository(
             val updates = mapOf(
                 "name" to cleanName,
                 "slug" to slug,
-                "image_url" to cleanImageUrl,
-                "vendor_type" to "hotel"
+                "image_url" to cleanImageUrl
             )
             val response = api.updateCategory("eq.$categoryId", updates)
             if (response.isSuccessful) {
@@ -500,7 +500,8 @@ class VendorRepository(
         availableFrom: String?,
         availableUntil: String?,
         stockQty: Int = 100,
-        isAvailable: Boolean = true
+        isAvailable: Boolean = true,
+        unit: String? = null
     ): Resource<Product> = withContext(Dispatchers.IO) {
         try {
             val body = mutableMapOf<String, Any?>(
@@ -512,6 +513,7 @@ class VendorRepository(
                 "is_available" to (isAvailable && stockQty > 0)
             )
             if (!categoryId.isNullOrEmpty()) body["category_id"] = categoryId
+            if (!unit.isNullOrBlank()) body["unit"] = unit.trim()
             if (!description.isNullOrEmpty()) body["description"] = description.trim()
             if (!imageUrl.isNullOrEmpty()) body["image_url"] = imageUrl.trim()
             if (!availableFrom.isNullOrEmpty()) body["available_from"] = availableFrom
@@ -1075,6 +1077,16 @@ class VendorRepository(
     }
 
     // 13. Cities for Self-Registration (Rule 6: Cached)
+    suspend fun getStoreCategories(): Resource<List<StoreCategoryOption>> = withContext(Dispatchers.IO) {
+        try {
+            val res = api.getStoreCategories()
+            if (res.isSuccessful) Resource.Success(res.body().orEmpty())
+            else Resource.Error(extractErrorMessage(res, "Could not load shop categories"), res.code())
+        } catch (e: Exception) {
+            Resource.Error(e.localizedMessage ?: "Could not load shop categories")
+        }
+    }
+
     suspend fun getActiveCities(forceRefresh: Boolean = false): Resource<List<City>> = withContext(Dispatchers.IO) {
         if (!forceRefresh && !cachedCities.isNullOrEmpty()) {
             return@withContext Resource.Success(cachedCities!!)
@@ -1374,7 +1386,10 @@ class VendorRepository(
         closingTime: String,
         email: String,
         foodLicensePath: String?,
-        aadharPath: String?
+        aadharPath: String?,
+        // "hotel" for a restaurant; "grocery" for a shop (Dukan), which also says which shop category it asks for.
+        vendorType: String = "hotel",
+        requestedStoreCategoryId: String? = null
     ): Resource<Vendor> = withContext(Dispatchers.IO) {
         try {
             // 1. Resolve authentic user.id
@@ -1441,7 +1456,7 @@ class VendorRepository(
                 "address" to address.trim(),
                 "opening_time" to openingTime.trim().ifBlank { "09:00" },
                 "closing_time" to closingTime.trim().ifBlank { "22:00" },
-                "vendor_type" to "hotel",
+                "vendor_type" to vendorType,
                 "food_license_url" to foodLicensePath.trim(),
                 "aadhar_document_url" to aadharPath.trim(),
                 "approval_status" to "pending"
@@ -1449,6 +1464,7 @@ class VendorRepository(
             if (latitude != null) vendorBody["latitude"] = latitude
             if (longitude != null) vendorBody["longitude"] = longitude
             if (email.trim().isNotBlank()) vendorBody["email"] = email.trim()
+            if (vendorType != "hotel" && !requestedStoreCategoryId.isNullOrBlank()) vendorBody["requested_store_category_id"] = requestedStoreCategoryId
 
             android.util.Log.d("VendorRepository", "Executing supabase.from('vendors').insert: $vendorBody")
             val vendorResponse = api.insertVendor(vendorBody)

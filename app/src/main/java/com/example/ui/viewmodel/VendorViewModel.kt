@@ -47,6 +47,8 @@ sealed interface AuthUiState {
 
 data class RegistrationUiState(
     val cities: List<City> = emptyList(),
+    val storeCategories: List<StoreCategoryOption> = emptyList(),
+    val isLoadingStoreCategories: Boolean = false,
     val isLoadingCities: Boolean = false,
     val isRequestingOtp: Boolean = false,
     val isSubmittingRegistration: Boolean = false,
@@ -2148,6 +2150,17 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     // --- Vendor Self-Registration ---
+    fun loadStoreCategories() {
+        viewModelScope.launch {
+            _registrationState.update { it.copy(isLoadingStoreCategories = true) }
+            when (val res = repository.getStoreCategories()) {
+                is Resource.Success -> _registrationState.update { it.copy(storeCategories = res.data, isLoadingStoreCategories = false) }
+                is Resource.Error -> _registrationState.update { it.copy(isLoadingStoreCategories = false) }
+                Resource.Loading -> {}
+            }
+        }
+    }
+
     fun loadCities() {
         viewModelScope.launch {
             _registrationState.update { it.copy(isLoadingCities = true, errorMessage = null) }
@@ -2338,6 +2351,8 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
         email: String,
         foodLicenseDoc: SelectedDocument?,
         aadharDoc: SelectedDocument?,
+        vendorType: String = "hotel",
+        requestedStoreCategoryId: String? = null,
         onComplete: (Boolean, String?, Vendor?) -> Unit = { _, _, _ -> }
     ) {
         viewModelScope.launch {
@@ -2458,7 +2473,9 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
                 closingTime = closingTime,
                 email = email,
                 foodLicensePath = foodPath,
-                aadharPath = aadharPath
+                aadharPath = aadharPath,
+                vendorType = vendorType,
+                requestedStoreCategoryId = requestedStoreCategoryId
             )) {
                 is Resource.Success -> {
                     _registrationState.update {
