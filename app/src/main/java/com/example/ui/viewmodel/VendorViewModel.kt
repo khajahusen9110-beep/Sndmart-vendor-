@@ -1091,6 +1091,15 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
             _menuState.update { it.copy(isSubmitting = true, errorMessage = null, successMessage = null) }
             when (val res = repository.createProduct(vendorId, categoryId, name, description, price, imageUrl, isActive, availableFrom, availableUntil, stockQty, isAvailable, unit, custom)) {
                 is Resource.Success -> {
+                    val vs = custom?.variants.orEmpty()
+                    if (vs.isNotEmpty()) {
+                        val vr = repository.saveProductVariants(res.data.id, vs)
+                        if (vr is Resource.Error) {
+                            _menuState.update { it.copy(products = listOf(res.data) + it.products, isSubmitting = false) }
+                            onComplete(false, "Item added, but its sizes were not saved: ${vr.message}. Open the item to add them again.")
+                            return@launch
+                        }
+                    }
                     _menuState.update { it.copy(products = listOf(res.data) + it.products, isSubmitting = false) }
                     showMenuSuccess("Item added to menu")
                     onComplete(true, null)
@@ -1185,6 +1194,20 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
                     _menuState.update { it.copy(isSubmitting = false, errorMessage = res.message) }
                     onComplete(false, res.message)
                 }
+                Resource.Loading -> {}
+            }
+        }
+    }
+
+    suspend fun loadProductVariants(productId: String): List<ProductVariant> =
+        (repository.getProductVariants(productId) as? Resource.Success)?.data.orEmpty()
+
+    /** Saves the sizes of an existing product (after the product itself was updated). */
+    fun saveProductVariants(productId: String, rows: List<VariantInput>, onComplete: (Boolean, String?) -> Unit) {
+        viewModelScope.launch {
+            when (val r = repository.saveProductVariants(productId, rows)) {
+                is Resource.Success -> onComplete(true, null)
+                is Resource.Error -> onComplete(false, r.message)
                 Resource.Loading -> {}
             }
         }

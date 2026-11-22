@@ -601,6 +601,8 @@ fun MainVendorApp(
                                 VendorNavTab.MENU -> {
                                     MenuScreen(
                                         state = menuState,
+                                        loadVariants = { id -> viewModel.loadProductVariants(id) },
+                                        onSaveVariants = { id, rows, done -> viewModel.saveProductVariants(id, rows, done) },
                                         isShop = (vendor.vendorType ?: "hotel") != "hotel",
                                         onAddCategory = { name, imageUrl, onComplete ->
                                             viewModel.addCategory(name, imageUrl, onComplete)

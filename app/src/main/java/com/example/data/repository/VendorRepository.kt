@@ -548,6 +548,37 @@ class VendorRepository(
         }
     }
 
+    suspend fun getProductVariants(productId: String): Resource<List<ProductVariant>> = withContext(Dispatchers.IO) {
+        try {
+            val res = api.getProductVariants("eq.$productId")
+            if (res.isSuccessful) Resource.Success(res.body().orEmpty())
+            else Resource.Error(extractErrorMessage(res, "Could not load sizes"), res.code())
+        } catch (e: Exception) { Resource.Error(e.localizedMessage ?: "Could not load sizes") }
+    }
+
+    /** Makes the product's variants match [rows]: new rows are added, changed rows updated, removed rows switched off. */
+    suspend fun saveProductVariants(productId: String, rows: List<VariantInput>): Resource<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            val existing = (api.getProductVariants("eq.$productId").body() ?: emptyList())
+            val keepIds = rows.mapNotNull { it.id }.toSet()
+            for (gone in existing.filter { it.id !in keepIds }) {
+                api.updateProductVariant("eq.${gone.id}", mapOf("is_active" to false, "is_available" to false))
+            }
+            for (r in rows.filter { it.id != null }) {
+                val res = api.updateProductVariant("eq.${r.id}", mapOf("label" to r.label.trim(), "price" to r.price, "is_available" to r.isAvailable, "is_active" to true))
+                if (!res.isSuccessful) return@withContext Resource.Error(extractErrorMessage(res, "Could not save sizes"), res.code())
+            }
+            val fresh = rows.filter { it.id == null }
+            if (fresh.isNotEmpty()) {
+                val res = api.createProductVariants(fresh.map {
+                    mapOf("product_id" to productId, "label" to it.label.trim(), "price" to it.price, "is_available" to it.isAvailable, "is_active" to true, "stock_qty" to 100, "stock_quantity" to 100)
+                })
+                if (!res.isSuccessful) return@withContext Resource.Error(extractErrorMessage(res, "Could not save sizes"), res.code())
+            }
+            Resource.Success(true)
+        } catch (e: Exception) { Resource.Error(e.localizedMessage ?: "Could not save sizes") }
+    }
+
     suspend fun updateProduct(
         productId: String,
         updates: Map<String, Any?>

@@ -29,6 +29,8 @@ import coil.compose.AsyncImage
 import com.example.data.model.Category
 import com.example.data.model.Product
 import com.example.data.model.ProductCustomization
+import com.example.data.model.ProductVariant
+import com.example.data.model.VariantInput
 import com.example.util.CurrencyFormatter
 import com.example.ui.components.ConfirmationDialog
 import com.example.ui.components.ProductCardSkeleton
@@ -65,6 +67,8 @@ private val TIME_OF_DAY_REGEX = Regex("^([01]?\\d|2[0-3]):[0-5]\\d(:[0-5]\\d)?$"
 fun MenuScreen(
     state: MenuUiState,
     isShop: Boolean = false,
+    loadVariants: suspend (String) -> List<ProductVariant> = { emptyList() },
+    onSaveVariants: (productId: String, rows: List<VariantInput>, onComplete: (Boolean, String?) -> Unit) -> Unit = { _, _, done -> done(true, null) },
     onAddCategory: (name: String, imageUrl: String, onComplete: (Boolean, String?) -> Unit) -> Unit,
     onUpdateCategory: (id: String, name: String, imageUrl: String, onComplete: (Boolean, String?) -> Unit) -> Unit,
     onDeleteCategory: (id: String, onComplete: (Boolean, String?) -> Unit) -> Unit,
@@ -1324,7 +1328,28 @@ fun MenuScreen(
         var customLabel by remember { mutableStateOf(editingProduct?.customNoteLabel ?: "") }
         var customRequired by remember { mutableStateOf(editingProduct?.customRequired ?: false) }
         var customLeadStr by remember { mutableStateOf((editingProduct?.customLeadHours ?: 0).let { if (it > 0) it.toString() else "" }) }
-        val customization = ProductCustomization(customOn, customNote, customPhoto, customLabel, customRequired, customLeadStr.toIntOrNull() ?: 0)
+        // Sizes / options with their own price (shops only). Existing ones are loaded when a product is edited.
+        class VariantRow(val id: String?, label: String, price: String) {
+            var label by mutableStateOf(label)
+            var price by mutableStateOf(price)
+        }
+        val variantRows = remember { mutableStateListOf<VariantRow>() }
+        var variantsLoaded by remember { mutableStateOf(!isEdit) }
+        LaunchedEffect(editingProduct?.id) {
+            val pid = editingProduct?.id
+            if (isShop && pid != null) {
+                runCatching { loadVariants(pid) }.onSuccess { list ->
+                    variantRows.clear()
+                    list.forEach { variantRows.add(VariantRow(it.id, it.label, it.price.toString().removeSuffix(".0"))) }
+                    variantsLoaded = true
+                }
+            }
+        }
+        val variantInputs = variantRows.mapNotNull { r ->
+            val pr = r.price.toDoubleOrNull()
+            if (r.label.isBlank() || pr == null || pr <= 0) null else VariantInput(r.id, r.label.trim(), pr)
+        }
+        val customization = ProductCustomization(customOn, customNote, customPhoto, customLabel, customRequired, customLeadStr.toIntOrNull() ?: 0, if (isShop && variantsLoaded) variantInputs else null)
         var imageUrl by remember { mutableStateOf(editingProduct?.imageUrl ?: "") }
         var selectedProductPhoto by remember { mutableStateOf<SelectedImageFile?>(null) }
         var isUploadingProductPhoto by remember { mutableStateOf(false) }
@@ -1509,6 +1534,35 @@ fun MenuScreen(
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(10.dp)
                             )
+                        }
+                    }
+
+                    // Sizes / options (shops only): e.g. 500 g / 1 kg, S / M / L, Red / Blue; each with its own price
+                    if (isShop) {
+                        item {
+                            Surface(shape = RoundedCornerShape(12.dp), color = PolishBackgroundLight, border = BorderStroke(1.dp, PolishBorderLight), modifier = Modifier.fillMaxWidth()) {
+                                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text("Sizes / options (optional)", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                    Text("e.g. 500 g and 1 kg, or S / M / L. The customer chooses one. The item price shown is the lowest.", fontSize = 11.sp, color = Slate500)
+                                    if (!variantsLoaded) Text("Loading sizes...", fontSize = 12.sp, color = Slate500)
+                                    variantRows.forEachIndexed { i, row ->
+                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            OutlinedTextField(
+                                                value = row.label, onValueChange = { row.label = it; errorMsg = null }, label = { Text("Option") },
+                                                placeholder = { Text("1 kg") }, singleLine = true, colors = polishTextFieldColors(),
+                                                modifier = Modifier.weight(1.3f), shape = RoundedCornerShape(10.dp)
+                                            )
+                                            OutlinedTextField(
+                                                value = row.price, onValueChange = { row.price = it.filter { c -> c.isDigit() || c == '.' }; errorMsg = null }, label = { Text("Price ₹") },
+                                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true, colors = polishTextFieldColors(),
+                                                modifier = Modifier.weight(1f), shape = RoundedCornerShape(10.dp)
+                                            )
+                                            IconButton(onClick = { variantRows.removeAt(i) }) { Icon(Icons.Default.Delete, contentDescription = "Remove option", tint = MaterialTheme.colorScheme.error) }
+                                        }
+                                    }
+                                    if (variantRows.size < 12) OutlinedButton(onClick = { variantRows.add(VariantRow(null, "", "")) }, enabled = variantsLoaded) { Icon(Icons.Default.Add, contentDescription = null); Spacer(Modifier.width(6.dp)); Text("Add size / option") }
+                                }
+                            }
                         }
                     }
 
@@ -1748,9 +1802,14 @@ fun MenuScreen(
                 Button(
                     onClick = {
                         val cleanName = name.trim()
-                        val price = priceStr.toDoubleOrNull()
+                        // with sizes, the item price is the lowest size price
+                        val price = if (isShop && variantInputs.isNotEmpty()) variantInputs.minOf { it.price } else priceStr.toDoubleOrNull()
                         if (cleanName.isBlank()) {
                             errorMsg = "Item name is required"
+                            return@Button
+                        }
+                        if (isShop && variantRows.any { (it.label.isNotBlank() && it.price.toDoubleOrNull().let { p -> p == null || p <= 0 }) || (it.label.isBlank() && it.price.isNotBlank()) || (it.label.isBlank() && it.price.isBlank()) }) {
+                            errorMsg = "Each size needs a name and a price above 0 (or remove the empty row)"
                             return@Button
                         }
                         if (price == null || price <= 0) {
@@ -1795,9 +1854,16 @@ fun MenuScreen(
                                         updates["description"] = description.ifBlank { null }
 
                                         onUpdateProduct(editingProduct!!.id, updates) { pSuccess, pErr ->
-                                            isSubmitting = false
-                                            if (pSuccess) editingProduct = null
-                                            else errorMsg = pErr
+                                            if (pSuccess && isShop && variantsLoaded) {
+                                                onSaveVariants(editingProduct!!.id, variantInputs) { vOk, vErr ->
+                                                    isSubmitting = false
+                                                    if (vOk) editingProduct = null else errorMsg = vErr
+                                                }
+                                            } else {
+                                                isSubmitting = false
+                                                if (pSuccess) editingProduct = null
+                                                else errorMsg = pErr
+                                            }
                                         }
                                     } else {
                                         onAddProduct(
@@ -1812,7 +1878,7 @@ fun MenuScreen(
                                             finalStock,
                                             isActive && finalStock > 0,
                                             if (isShop) unitStr.trim().ifBlank { null } else null,
-                                            if (isShop && customOn) customization else null
+                                            if (isShop) customization else null
                                         ) { pSuccess, pErr ->
                                             isSubmitting = false
                                             if (pSuccess) showAddProductDialog = false
@@ -1842,9 +1908,16 @@ fun MenuScreen(
                                 updates["image_url"] = imageUrl.ifBlank { null }
 
                                 onUpdateProduct(editingProduct!!.id, updates) { success, err ->
-                                    isSubmitting = false
-                                    if (success) editingProduct = null
-                                    else errorMsg = err
+                                    if (success && isShop && variantsLoaded) {
+                                        onSaveVariants(editingProduct!!.id, variantInputs) { vOk, vErr ->
+                                            isSubmitting = false
+                                            if (vOk) editingProduct = null else errorMsg = vErr
+                                        }
+                                    } else {
+                                        isSubmitting = false
+                                        if (success) editingProduct = null
+                                        else errorMsg = err
+                                    }
                                 }
                             } else {
                                 onAddProduct(
@@ -1859,7 +1932,7 @@ fun MenuScreen(
                                     finalStock,
                                     isActive && finalStock > 0,
                                     if (isShop) unitStr.trim().ifBlank { null } else null,
-                                    if (isShop && customOn) customization else null
+                                    if (isShop) customization else null
                                 ) { success, err ->
                                     isSubmitting = false
                                     if (success) showAddProductDialog = false

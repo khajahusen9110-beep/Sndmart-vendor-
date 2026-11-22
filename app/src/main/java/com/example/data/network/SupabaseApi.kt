@@ -145,6 +145,24 @@ interface SupabaseApi {
         @Body product: Map<String, @JvmSuppressWildcards Any?>
     ): Response<List<Product>>
 
+    // Sizes / options of a shop product
+    @GET("rest/v1/product_variants")
+    suspend fun getProductVariants(
+        @Query("product_id") productIdFilter: String,
+        @Query("is_active") isActive: String = "eq.true",
+        @Query("select") select: String = "id,product_id,label,price,is_available,is_active",
+        @Query("order") order: String = "price.asc"
+    ): Response<List<ProductVariant>>
+
+    @POST("rest/v1/product_variants")
+    suspend fun createProductVariants(@Body rows: List<Map<String, @JvmSuppressWildcards Any?>>): Response<okhttp3.ResponseBody>
+
+    @PATCH("rest/v1/product_variants")
+    suspend fun updateProductVariant(
+        @Query("id") idFilter: String,
+        @Body updates: Map<String, @JvmSuppressWildcards Any?>
+    ): Response<okhttp3.ResponseBody>
+
     @PATCH("rest/v1/products")
     @Headers("Prefer: return=representation")
     suspend fun updateProduct(

@@ -514,7 +514,9 @@ data class ProductCustomization(
     val allowPhoto: Boolean = false,
     val noteLabel: String? = null,
     val required: Boolean = false,
-    val leadHours: Int = 0
+    val leadHours: Int = 0,
+    /** Sizes / options with their own price (null = leave the product's variants untouched) */
+    val variants: List<VariantInput>? = null
 ) {
     fun toMap(): Map<String, Any?> = mapOf(
         "is_customizable" to enabled,
@@ -525,3 +527,17 @@ data class ProductCustomization(
         "custom_lead_hours" to leadHours.coerceIn(0, 168)
     )
 }
+
+
+/** A size / weight / colour option of a shop product, as typed in the product form. */
+data class VariantInput(val id: String? = null, val label: String, val price: Double, val isAvailable: Boolean = true)
+
+@JsonClass(generateAdapter = true)
+data class ProductVariant(
+    val id: String = "",
+    @Json(name = "product_id") val productId: String = "",
+    val label: String = "",
+    val price: Double = 0.0,
+    @Json(name = "is_available") val isAvailable: Boolean = true,
+    @Json(name = "is_active") val isActive: Boolean = true
+)
