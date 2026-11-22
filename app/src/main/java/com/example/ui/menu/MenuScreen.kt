@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.data.model.Category
 import com.example.data.model.Product
+import com.example.data.model.ProductCustomization
 import com.example.util.CurrencyFormatter
 import com.example.ui.components.ConfirmationDialog
 import com.example.ui.components.ProductCardSkeleton
@@ -67,7 +68,7 @@ fun MenuScreen(
     onAddCategory: (name: String, imageUrl: String, onComplete: (Boolean, String?) -> Unit) -> Unit,
     onUpdateCategory: (id: String, name: String, imageUrl: String, onComplete: (Boolean, String?) -> Unit) -> Unit,
     onDeleteCategory: (id: String, onComplete: (Boolean, String?) -> Unit) -> Unit,
-    onAddProduct: (categoryId: String?, name: String, description: String?, price: Double, imageUrl: String?, isActive: Boolean, availableFrom: String?, availableUntil: String?, stockQty: Int, isAvailable: Boolean, unit: String?, onComplete: (Boolean, String?) -> Unit) -> Unit,
+    onAddProduct: (categoryId: String?, name: String, description: String?, price: Double, imageUrl: String?, isActive: Boolean, availableFrom: String?, availableUntil: String?, stockQty: Int, isAvailable: Boolean, unit: String?, custom: ProductCustomization?, onComplete: (Boolean, String?) -> Unit) -> Unit,
     onUpdateProduct: (productId: String, updates: Map<String, Any?>, onComplete: (Boolean, String?) -> Unit) -> Unit,
     onToggleProductActive: (Product) -> Unit,
     onDeleteProduct: (productId: String, onComplete: (Boolean, String?) -> Unit) -> Unit,
@@ -1316,6 +1317,14 @@ fun MenuScreen(
         var priceStr by remember { mutableStateOf(if (isEdit) editingProduct!!.price.toString() else "") }
         var description by remember { mutableStateOf(editingProduct?.description ?: "") }
         var unitStr by remember { mutableStateOf(editingProduct?.unit?.takeIf { it != "piece" } ?: "") }
+        // Made-to-order options (shops only)
+        var customOn by remember { mutableStateOf(editingProduct?.isCustomizable ?: false) }
+        var customNote by remember { mutableStateOf(editingProduct?.customAllowNote ?: true) }
+        var customPhoto by remember { mutableStateOf(editingProduct?.customAllowPhoto ?: false) }
+        var customLabel by remember { mutableStateOf(editingProduct?.customNoteLabel ?: "") }
+        var customRequired by remember { mutableStateOf(editingProduct?.customRequired ?: false) }
+        var customLeadStr by remember { mutableStateOf((editingProduct?.customLeadHours ?: 0).let { if (it > 0) it.toString() else "" }) }
+        val customization = ProductCustomization(customOn, customNote, customPhoto, customLabel, customRequired, customLeadStr.toIntOrNull() ?: 0)
         var imageUrl by remember { mutableStateOf(editingProduct?.imageUrl ?: "") }
         var selectedProductPhoto by remember { mutableStateOf<SelectedImageFile?>(null) }
         var isUploadingProductPhoto by remember { mutableStateOf(false) }
@@ -1500,6 +1509,40 @@ fun MenuScreen(
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(10.dp)
                             )
+                        }
+                    }
+
+                    // Made-to-order options (shops only): the customer writes a message and/or adds a photo
+                    if (isShop) {
+                        item {
+                            Surface(shape = RoundedCornerShape(12.dp), color = PolishBackgroundLight, border = BorderStroke(1.dp, PolishBorderLight), modifier = Modifier.fillMaxWidth()) {
+                                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text("Customisable product", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                            Text("Cake, gift, frame: ask the customer for a message and/or photo", fontSize = 11.sp, color = Slate500)
+                                        }
+                                        Switch(checked = customOn, onCheckedChange = { customOn = it })
+                                    }
+                                    if (customOn) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(checked = customNote, onCheckedChange = { customNote = it }); Text("Ask for a message / name") }
+                                        if (customNote) OutlinedTextField(
+                                            value = customLabel, onValueChange = { customLabel = it }, label = { Text("Question shown to the customer") },
+                                            placeholder = { Text("e.g. Name to write on the cake") }, singleLine = true, colors = polishTextFieldColors(),
+                                            modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp)
+                                        )
+                                        Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(checked = customPhoto, onCheckedChange = { customPhoto = it }); Text("Ask for a photo") }
+                                        Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(checked = customRequired, onCheckedChange = { customRequired = it }); Text("Customer must fill these before ordering") }
+                                        OutlinedTextField(
+                                            value = customLeadStr, onValueChange = { customLeadStr = it.filter { ch -> ch.isDigit() }.take(3) },
+                                            label = { Text("Notice needed (hours, 0 = none)") }, placeholder = { Text("e.g. 24 for a cake") },
+                                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, colors = polishTextFieldColors(),
+                                            modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp)
+                                        )
+                                        if (!customNote && !customPhoto) Text("Choose at least a message or a photo.", fontSize = 11.sp, color = MaterialTheme.colorScheme.error)
+                                    }
+                                }
+                            }
                         }
                     }
 
@@ -1720,6 +1763,10 @@ fun MenuScreen(
                             errorMsg = "Please enter a valid stock quantity (0 or greater)"
                             return@Button
                         }
+                        if (isShop && customOn && !customNote && !customPhoto) {
+                            errorMsg = "Customisable product: choose a message, a photo, or both"
+                            return@Button
+                        }
 
                         // Upload image if a new photo was selected
                         if (selectedProductPhoto != null) {
@@ -1744,6 +1791,7 @@ fun MenuScreen(
                                         )
                                         if (categoryId != null) updates["category_id"] = categoryId
                                         if (isShop) updates["unit"] = unitStr.trim().ifBlank { "piece" }
+                                        if (isShop) updates.putAll(customization.toMap())
                                         updates["description"] = description.ifBlank { null }
 
                                         onUpdateProduct(editingProduct!!.id, updates) { pSuccess, pErr ->
@@ -1763,7 +1811,8 @@ fun MenuScreen(
                                             availableUntil.ifBlank { null },
                                             finalStock,
                                             isActive && finalStock > 0,
-                                            if (isShop) unitStr.trim().ifBlank { null } else null
+                                            if (isShop) unitStr.trim().ifBlank { null } else null,
+                                            if (isShop && customOn) customization else null
                                         ) { pSuccess, pErr ->
                                             isSubmitting = false
                                             if (pSuccess) showAddProductDialog = false
@@ -1788,6 +1837,7 @@ fun MenuScreen(
                                 )
                                 if (categoryId != null) updates["category_id"] = categoryId
                                 if (isShop) updates["unit"] = unitStr.trim().ifBlank { "piece" }
+                                if (isShop) updates.putAll(customization.toMap())
                                 updates["description"] = description.ifBlank { null }
                                 updates["image_url"] = imageUrl.ifBlank { null }
 
@@ -1808,7 +1858,8 @@ fun MenuScreen(
                                     availableUntil.ifBlank { null },
                                     finalStock,
                                     isActive && finalStock > 0,
-                                    if (isShop) unitStr.trim().ifBlank { null } else null
+                                    if (isShop) unitStr.trim().ifBlank { null } else null,
+                                    if (isShop && customOn) customization else null
                                 ) { success, err ->
                                     isSubmitting = false
                                     if (success) showAddProductDialog = false

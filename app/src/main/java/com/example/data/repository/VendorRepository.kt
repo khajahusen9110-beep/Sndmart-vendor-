@@ -481,7 +481,8 @@ class VendorRepository(
         availableUntil: String?,
         stockQty: Int = 100,
         isAvailable: Boolean = true,
-        unit: String? = null
+        unit: String? = null,
+        custom: ProductCustomization? = null
     ): Resource<Product> = withContext(Dispatchers.IO) {
         try {
             val body = mutableMapOf<String, Any?>(
@@ -494,6 +495,7 @@ class VendorRepository(
             )
             if (!categoryId.isNullOrEmpty()) body["category_id"] = categoryId
             if (!unit.isNullOrBlank()) body["unit"] = unit.trim()
+            if (custom != null && custom.enabled) body.putAll(custom.toMap())
             if (!description.isNullOrEmpty()) body["description"] = description.trim()
             if (!imageUrl.isNullOrEmpty()) body["image_url"] = imageUrl.trim()
             if (!availableFrom.isNullOrEmpty()) body["available_from"] = availableFrom
@@ -1057,6 +1059,18 @@ class VendorRepository(
     }
 
     // 13. Cities for Self-Registration (Rule 6: Cached)
+    /** A short-lived link to the customer's photo for a made-to-order line, or null. */
+    suspend fun getCustomPhotoUrl(path: String): String? = withContext(Dispatchers.IO) {
+        try {
+            val res = api.signCustomPhoto(path, mapOf("expiresIn" to 900))
+            if (!res.isSuccessful) return@withContext null
+            val signed = org.json.JSONObject(res.body()?.string().orEmpty()).optString("signedURL")
+            if (signed.isBlank()) return@withContext null
+            val base = com.example.data.network.SupabaseClient.resolveBaseUrl().trimEnd('/')
+            if (signed.startsWith("http")) signed else "$base/storage/v1${if (signed.startsWith("/")) signed else "/$signed"}"
+        } catch (_: Exception) { null }
+    }
+
     suspend fun getStoreCategories(): Resource<List<StoreCategoryOption>> = withContext(Dispatchers.IO) {
         try {
             val res = api.getStoreCategories()

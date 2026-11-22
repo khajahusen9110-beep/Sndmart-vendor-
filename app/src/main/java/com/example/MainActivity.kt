@@ -595,8 +595,8 @@ fun MainVendorApp(
                                         onDeleteCategory = { id, onComplete ->
                                             viewModel.deleteCategory(id, onComplete)
                                         },
-                                        onAddProduct = { catId, name, desc, price, img, active, from, until, stock, isAvail, unit, onComplete ->
-                                            viewModel.addProduct(catId, name, desc, price, img, active, from, until, stock, isAvail, unit, onComplete)
+                                        onAddProduct = { catId, name, desc, price, img, active, from, until, stock, isAvail, unit, custom, onComplete ->
+                                            viewModel.addProduct(catId, name, desc, price, img, active, from, until, stock, isAvail, unit, custom, onComplete)
                                         },
                                         onUpdateProduct = { prodId, updates, onComplete ->
                                             viewModel.updateProduct(prodId, updates, onComplete)
@@ -628,6 +628,7 @@ fun MainVendorApp(
                                 VendorNavTab.ORDERS -> {
                                     OrdersScreen(
                                         state = ordersState,
+                                        loadCustomPhotoUrl = { p -> viewModel.customPhotoUrl(p) },
                                         onFilterChange = { filter ->
                                             viewModel.setOrdersFilter(filter)
                                         },

@@ -20,6 +20,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.clickable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -50,6 +51,7 @@ val ORDER_STATUS_FILTERS = listOf(
 @Composable
 fun OrdersScreen(
     state: OrdersUiState,
+    loadCustomPhotoUrl: suspend (String) -> String? = { null },
     onFilterChange: (String) -> Unit,
     onSelectOrder: (Order?) -> Unit,
     onUpdateOrderStatus: (orderId: String, fromStatus: String, newStatus: String, onComplete: (Boolean, String?) -> Unit) -> Unit,
@@ -812,6 +814,35 @@ fun OrdersScreen(
                                     fontWeight = FontWeight.Bold,
                                     color = Slate900
                                 )
+                            }
+                            // Made-to-order line: what the customer wants written + their photo
+                            if (!item.custom_note.isNullOrBlank() || !item.custom_photo_path.isNullOrBlank()) {
+                                Surface(
+                                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = PolishAmberLight,
+                                    border = BorderStroke(1.dp, PolishAmber)
+                                ) {
+                                    Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Text("✏️ Customer's customisation", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = PolishAmberDark)
+                                        item.custom_note?.takeIf { it.isNotBlank() }?.let { Text(it, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Slate900) }
+                                        item.custom_photo_path?.takeIf { it.isNotBlank() }?.let { path ->
+                                            var photoUrl by remember(path) { mutableStateOf<String?>(null) }
+                                            var photoFailed by remember(path) { mutableStateOf(false) }
+                                            LaunchedEffect(path) { photoUrl = loadCustomPhotoUrl(path); photoFailed = photoUrl == null }
+                                            if (photoUrl != null) {
+                                                coil.compose.AsyncImage(
+                                                    model = photoUrl, contentDescription = "Customer photo",
+                                                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                                    modifier = Modifier.size(140.dp).clip(RoundedCornerShape(10.dp)).clickable {
+                                                        runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(photoUrl)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                                                    }
+                                                )
+                                                Text("Tap the photo to open it full size", fontSize = 11.sp, color = Slate500)
+                                            } else Text(if (photoFailed) "Photo could not be loaded" else "Loading photo...", fontSize = 12.sp, color = Slate500)
+                                        }
+                                    }
+                                }
                             }
                         }
                     }

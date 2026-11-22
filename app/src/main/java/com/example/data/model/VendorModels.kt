@@ -151,7 +151,14 @@ data class Product(
     @Json(name = "is_active") val isActive: Boolean = true,
     @Json(name = "available_from") val availableFrom: String? = null,
     @Json(name = "available_until") val availableUntil: String? = null,
-    @Json(name = "created_at") val createdAt: String? = null
+    @Json(name = "created_at") val createdAt: String? = null,
+    // Shops: made-to-order options (message / photo / notice) the customer is asked for
+    @Json(name = "is_customizable") val isCustomizable: Boolean = false,
+    @Json(name = "custom_allow_note") val customAllowNote: Boolean = true,
+    @Json(name = "custom_allow_photo") val customAllowPhoto: Boolean = false,
+    @Json(name = "custom_note_label") val customNoteLabel: String? = null,
+    @Json(name = "custom_required") val customRequired: Boolean = false,
+    @Json(name = "custom_lead_hours") val customLeadHours: Int = 0
 ) {
     val effectiveStock: Int get() = stockQty ?: stockQuantity ?: 0
     val isSoldOut: Boolean get() = effectiveStock <= 0
@@ -188,7 +195,10 @@ data class OrderItem(
     val product_id: String? = null,
     val vendor_id: String? = null,
     val variant_label: String? = null,
-    val name: String? = null
+    val name: String? = null,
+    // Shops: what the customer wrote / the photo they added for this made-to-order line
+    val custom_note: String? = null,
+    val custom_photo_path: String? = null
 ) {
     val productName: String? get() = product_name ?: name
     val unitPrice: Double get() = unit_price ?: 0.0
@@ -495,3 +505,23 @@ data class StoreCategoryOption(
     val name: String = "",
     @Json(name = "name_kn") val nameKn: String? = null
 )
+
+
+/** What a shop asks the customer for on one product (message, photo, notice in hours). */
+data class ProductCustomization(
+    val enabled: Boolean = false,
+    val allowNote: Boolean = true,
+    val allowPhoto: Boolean = false,
+    val noteLabel: String? = null,
+    val required: Boolean = false,
+    val leadHours: Int = 0
+) {
+    fun toMap(): Map<String, Any?> = mapOf(
+        "is_customizable" to enabled,
+        "custom_allow_note" to allowNote,
+        "custom_allow_photo" to allowPhoto,
+        "custom_note_label" to noteLabel?.trim()?.ifBlank { null },
+        "custom_required" to required,
+        "custom_lead_hours" to leadHours.coerceIn(0, 168)
+    )
+}

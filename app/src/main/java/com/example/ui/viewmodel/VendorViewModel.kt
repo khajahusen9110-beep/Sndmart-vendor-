@@ -440,6 +440,8 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    suspend fun customPhotoUrl(path: String): String? = repository.getCustomPhotoUrl(path)
+
     fun clearSessionExpiredNotice() {
         sessionManager.sessionExpiredMessage = null
         _sessionExpiredNotice.value = null
@@ -1022,6 +1024,7 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
         stockQty: Int = 100,
         isAvailable: Boolean = true,
         unit: String? = null,
+        custom: ProductCustomization? = null,
         onComplete: (Boolean, String?) -> Unit
     ) {
         val vendorId = currentVendorId()
@@ -1031,7 +1034,7 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
         }
         viewModelScope.launch {
             _menuState.update { it.copy(isSubmitting = true, errorMessage = null, successMessage = null) }
-            when (val res = repository.createProduct(vendorId, categoryId, name, description, price, imageUrl, isActive, availableFrom, availableUntil, stockQty, isAvailable, unit)) {
+            when (val res = repository.createProduct(vendorId, categoryId, name, description, price, imageUrl, isActive, availableFrom, availableUntil, stockQty, isAvailable, unit, custom)) {
                 is Resource.Success -> {
                     _menuState.update { it.copy(products = listOf(res.data) + it.products, isSubmitting = false) }
                     showMenuSuccess("Item added to menu")
