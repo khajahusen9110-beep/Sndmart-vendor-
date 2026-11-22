@@ -1100,6 +1100,7 @@ fun MenuScreen(
         var isSubmitting by remember { mutableStateOf(false) }
 
         AlertDialog(
+            modifier = androidx.compose.ui.Modifier.then(com.example.util.TapFeedbackModifier),
             onDismissRequest = {
                 if (!isSubmitting && !isUploadingCategoryPhoto) {
                     showAddCategoryDialog = false
@@ -1379,6 +1380,7 @@ fun MenuScreen(
         var categoryDropdownExpanded by remember { mutableStateOf(false) }
 
         AlertDialog(
+            modifier = androidx.compose.ui.Modifier.then(com.example.util.TapFeedbackModifier),
             onDismissRequest = {
                 if (!isSubmitting && !isUploadingProductPhoto) {
                     showAddProductDialog = false

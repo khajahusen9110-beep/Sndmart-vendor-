@@ -447,7 +447,7 @@ fun EarningsScreen(
                         Spacer(modifier = Modifier.height(8.dp))
                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text(
-                                text = "• When an order is delivered, the food subtotal is added to your wallet balance.",
+                                text = if (com.example.ui.LocalVendorLabels.current.isHotel) "• When an order is delivered, the food subtotal (after commission) is added to your wallet balance." else "• When an order is delivered, your item amount (after commission) is added to your wallet balance.",
                                 fontSize = 12.sp,
                                 color = Slate700,
                                 lineHeight = 16.sp
@@ -971,6 +971,7 @@ fun EarningsScreen(
             )
         } else {
             AlertDialog(
+                modifier = androidx.compose.ui.Modifier.then(com.example.util.TapFeedbackModifier),
                 onDismissRequest = {
                     if (!state.isSubmittingWithdrawal && !isSubmittingLocally) showWithdrawalDialog = false
                 },

@@ -207,7 +207,7 @@ fun StoreProfileScreen(
                             color = Slate900
                         )
                         Text(
-                            text = "This photo appears at the top of your restaurant store page in the customer app.",
+                            text = if (com.example.ui.LocalVendorLabels.current.isHotel) "This photo appears at the top of your restaurant store page in the customer app." else "This photo appears at the top of your shop page in the customer app.",
                             style = MaterialTheme.typography.bodySmall,
                             color = Slate500
                         )
@@ -1006,6 +1006,7 @@ private fun OperatingHourSlotDialog(
     }
 
     AlertDialog(
+        modifier = androidx.compose.ui.Modifier.then(com.example.util.TapFeedbackModifier),
         onDismissRequest = { if (!isSubmitting) onDismiss() },
         title = { Text(title, fontWeight = FontWeight.Bold) },
         text = {

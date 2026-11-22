@@ -26,6 +26,7 @@ fun OptionalUpdateDialog(
         ?: "A new update for Sndmart Vendor is available with improvements, enhanced stability, and new features."
 
     AlertDialog(
+        modifier = androidx.compose.ui.Modifier.then(com.example.util.TapFeedbackModifier),
         onDismissRequest = onDismiss,
         icon = {
             Icon(

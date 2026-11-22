@@ -247,6 +247,7 @@ fun ConfirmationDialog(
     onDismiss: () -> Unit
 ) {
     AlertDialog(
+        modifier = androidx.compose.ui.Modifier.then(com.example.util.TapFeedbackModifier),
         onDismissRequest = { if (!isLoading) onDismiss() },
         title = {
             Text(text = title, fontWeight = FontWeight.Bold)

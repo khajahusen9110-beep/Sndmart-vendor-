@@ -188,7 +188,7 @@ interface SupabaseApi {
     suspend fun getOrders(
         @Query("vendor_id") vendorIdFilter: String,
         @Query("status") statusFilter: String = "in.(confirmed,preparing,ready,out_for_delivery,delivered,cancelled,rejected)",
-        @Query("select") select: String = "id,order_number,status,subtotal,discount_amount,delivery_fee,handling_fee,total_amount,commission_amount,vendor_amount,notes,cooking_instructions,payment_status,payment_method,created_at,scheduled_for,scheduled_until,customer_id,address_id,order_items(id,product_name,quantity,unit_price,total_price,custom_note,custom_photo_path),address:customer_addresses!orders_address_id_fkey(address_line,landmark,recipient_name,phone)",
+        @Query("select") select: String = "id,order_number,status,subtotal,discount_amount,delivery_fee,handling_fee,total_amount,commission_amount,vendor_amount,notes,cooking_instructions,payment_status,payment_method,created_at,scheduled_for,scheduled_until,prepare_from,customer_id,address_id,order_items(id,product_name,quantity,unit_price,total_price,custom_note,custom_photo_path),address:customer_addresses!orders_address_id_fkey(address_line,landmark,recipient_name,phone)",
         @Query("order") order: String = "created_at.desc,id.desc",
         @Query("limit") limit: Int? = 20,
         @Query("offset") offset: Int? = 0

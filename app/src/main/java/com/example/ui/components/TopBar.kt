@@ -50,7 +50,7 @@ fun VendorTopBar(
                 }
                 Column {
                     Text(
-                        text = vendor?.name?.ifBlank { "The Spice Kitchen" } ?: "The Spice Kitchen",
+                        text = vendor?.name?.ifBlank { "Your Store" } ?: "Your Store",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = SpruceOnContainer,

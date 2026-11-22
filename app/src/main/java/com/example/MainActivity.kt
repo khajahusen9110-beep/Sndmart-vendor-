@@ -102,6 +102,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         com.example.util.AppFeedback.init(this)
+        com.example.data.local.LiveCache.init(this)
         enableEdgeToEdge()
         playUpdateManager = PlayUpdateManager(this)
         fullScreenPromptSkipped = readFullScreenSkipped()

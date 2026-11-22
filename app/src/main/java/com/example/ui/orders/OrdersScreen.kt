@@ -39,6 +39,7 @@ import kotlinx.coroutines.delay
 val ORDER_STATUS_FILTERS = listOf(
     "ALL" to "All",
     "CONFIRMED" to "Confirmed",
+    "SCHEDULED" to "Scheduled",
     "PREPARING" to "Preparing",
     "READY" to "Ready",
     "OUT_FOR_DELIVERY" to "Out for Delivery",
@@ -46,6 +47,16 @@ val ORDER_STATUS_FILTERS = listOf(
     "CANCELLED" to "Cancelled",
     "REJECTED" to "Rejected"
 )
+
+/** A scheduled order that is still to be made (not yet delivered, cancelled or rejected). */
+private fun isActiveScheduled(o: Order): Boolean =
+    o.isScheduled && o.status?.lowercase() in setOf("confirmed", "preparing", "ready", "out_for_delivery")
+
+private fun matchesOrderFilter(o: Order, key: String): Boolean = when (key) {
+    "ALL" -> true
+    "SCHEDULED" -> isActiveScheduled(o)
+    else -> o.status.equals(key, ignoreCase = true)
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -61,6 +72,9 @@ fun OrdersScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    // ticks every 30 s so a scheduled order's "Prepare from" button opens by itself
+    var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) { while (true) { kotlinx.coroutines.delay(30_000); nowMs = System.currentTimeMillis() } }
     var orderToCancel by remember { mutableStateOf<Order?>(null) }
     var localSearchText by remember { mutableStateOf(state.searchQuery) }
 
@@ -74,8 +88,9 @@ fun OrdersScreen(
 
     val filteredOrders = remember(state.orders, state.activeFilter, state.searchQuery) {
         val visibleOrders = state.orders.filter { it.status?.lowercase() != "pending" }
-        val byFilter = if (state.activeFilter == "ALL") visibleOrders
-        else visibleOrders.filter { it.status.equals(state.activeFilter, ignoreCase = true) }
+        val byFilter = visibleOrders.filter { matchesOrderFilter(it, state.activeFilter) }
+            // the scheduled list reads by time: the order due first comes first
+            .let { l -> if (state.activeFilter == "SCHEDULED") l.sortedBy { it.scheduledForMillis ?: Long.MAX_VALUE } else l }
 
         if (state.searchQuery.isBlank()) {
             byFilter
@@ -185,8 +200,7 @@ fun OrdersScreen(
                 items(ORDER_STATUS_FILTERS) { (filterKey, label) ->
                     val isSelected = state.activeFilter.equals(filterKey, ignoreCase = true)
                     val visibleOrders = state.orders.filter { it.status?.lowercase() != "pending" }
-                    val count = if (filterKey == "ALL") visibleOrders.size
-                    else visibleOrders.count { it.status.equals(filterKey, ignoreCase = true) }
+                    val count = visibleOrders.count { matchesOrderFilter(it, filterKey) }
 
                     FilterChip(
                         selected = isSelected,
@@ -514,6 +528,7 @@ fun OrdersScreen(
                                             ) {
                                                 Text("Cancel")
                                             }
+                                            val waitUntil = order.prepareFromMillis?.takeIf { order.isScheduled && it > nowMs }
                                             Button(
                                                 onClick = {
                                                     onUpdateOrderStatus(order.id, "confirmed", "preparing") { success, err ->
@@ -522,14 +537,18 @@ fun OrdersScreen(
                                                         }
                                                     }
                                                 },
-                                                enabled = !state.isUpdating,
+                                                enabled = !state.isUpdating && waitUntil == null,
                                                 colors = ButtonDefaults.buttonColors(containerColor = SprucePrimary),
                                                 shape = RoundedCornerShape(12.dp),
                                                 modifier = Modifier.weight(1.3f)
                                             ) {
-                                                Icon(imageVector = Icons.Default.Kitchen, contentDescription = null, modifier = Modifier.size(16.dp))
+                                                Icon(imageVector = if (waitUntil != null) Icons.Default.Schedule else Icons.Default.Kitchen, contentDescription = null, modifier = Modifier.size(16.dp))
                                                 Spacer(modifier = Modifier.width(6.dp))
-                                                Text("Start Preparing", fontWeight = FontWeight.Bold)
+                                                Text(
+                                                    if (waitUntil != null) "Prepare from " + java.text.SimpleDateFormat("h:mm a", java.util.Locale.ENGLISH).apply { timeZone = java.util.TimeZone.getTimeZone("Asia/Kolkata") }.format(java.util.Date(waitUntil))
+                                                    else "Start Preparing",
+                                                    fontWeight = FontWeight.Bold
+                                                )
                                             }
                                         }
                                     }
@@ -663,6 +682,7 @@ fun OrdersScreen(
     if (state.selectedOrder != null) {
         val order = state.selectedOrder
         AlertDialog(
+            modifier = androidx.compose.ui.Modifier.then(com.example.util.TapFeedbackModifier),
             onDismissRequest = { onSelectOrder(null) },
             title = {
                 Row(
@@ -1027,6 +1047,7 @@ fun OrdersScreen(
     // --- Cancel Order Confirmation ---
     orderToCancel?.let { targetOrder ->
         AlertDialog(
+            modifier = androidx.compose.ui.Modifier.then(com.example.util.TapFeedbackModifier),
             onDismissRequest = { if (!state.isUpdating) orderToCancel = null },
             title = {
                 Text("Cancel Order #${targetOrder.orderNumber ?: targetOrder.id.take(6).uppercase()}?", fontWeight = FontWeight.Bold, color = Slate900)

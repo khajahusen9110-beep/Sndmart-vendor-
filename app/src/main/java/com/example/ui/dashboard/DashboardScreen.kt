@@ -556,6 +556,7 @@ fun DashboardScreen(
     if (state.showAutostartTipDialog) {
         val oemName = android.os.Build.MANUFACTURER.replaceFirstChar { it.uppercase() }
         AlertDialog(
+            modifier = androidx.compose.ui.Modifier.then(com.example.util.TapFeedbackModifier),
             onDismissRequest = onDismissAutostartTip,
             icon = {
                 Icon(

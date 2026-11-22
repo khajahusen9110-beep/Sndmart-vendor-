@@ -76,3 +76,6 @@ fun Modifier.globalTapFeedback(): Modifier = this.pointerInput(Unit) {
         if (down.isConsumed) AppFeedback.tap()
     }
 }
+
+/** The same tap feedback as a ready-made modifier, for dialogs: a dialog is its own window, so the root one cannot hear it. */
+val TapFeedbackModifier: Modifier get() = Modifier.globalTapFeedback()

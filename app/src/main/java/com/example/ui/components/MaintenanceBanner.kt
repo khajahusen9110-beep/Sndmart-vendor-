@@ -115,7 +115,7 @@ fun MaintenanceBanner(
                 Spacer(modifier = Modifier.height(4.dp))
 
                 Text(
-                    text = "You can still manage existing orders, store menu & earnings normally.",
+                    text = "You can still manage existing orders, your products & earnings normally.",
                     style = MaterialTheme.typography.labelSmall,
                     fontSize = 11.sp,
                     color = Slate600

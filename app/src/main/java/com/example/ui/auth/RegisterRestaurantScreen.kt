@@ -1391,6 +1391,7 @@ fun RegisterRestaurantScreen(
     // Modal Error Alert if registration submission fails
     if (registrationState.errorMessage != null) {
         AlertDialog(
+            modifier = androidx.compose.ui.Modifier.then(com.example.util.TapFeedbackModifier),
             onDismissRequest = { viewModel.clearRegistrationMessages() },
             icon = {
                 Icon(

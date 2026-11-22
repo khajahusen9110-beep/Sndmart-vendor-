@@ -81,7 +81,7 @@ fun PendingApprovalScreen(
             Spacer(modifier = Modifier.height(12.dp))
 
             Text(
-                text = "Your store application for \"${vendor.name.ifBlank { "your hotel" }}\" is currently pending review by the Sndmart City Admin team. You will be able to access the vendor portal once approved.",
+                text = "Your store application for \"${vendor.name.ifBlank { "your business" }}\" is currently pending review by the Sndmart City Admin team. You will be able to access the vendor portal once approved.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = Slate600,
                 textAlign = TextAlign.Center,

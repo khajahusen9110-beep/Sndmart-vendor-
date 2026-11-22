@@ -6,6 +6,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.BuildConfig
 import com.example.data.local.SessionManager
+import com.example.data.local.LiveCache
 import com.example.data.model.*
 import com.example.data.network.SupabaseClient
 import com.example.data.repository.Resource
@@ -494,7 +495,31 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     /** Clears all vendor-specific screen data so a different account never sees stale data. */
+    /** Paint the last known orders and numbers at once; the fresh ones replace them a moment later. No alarms from this. */
+    private fun restoreFromCache(vendorId: String) {
+        if (_ordersState.value.orders.isEmpty()) {
+            LiveCache.loadOrders(vendorId)?.takeIf { it.isNotEmpty() }?.let { cached ->
+                _ordersState.update { it.copy(orders = cached, isLoading = false) }
+            }
+        }
+        if (!_dashboardState.value.hasLoadedOnce) {
+            LiveCache.loadDashboard(vendorId)?.let { d ->
+                _dashboardState.update {
+                    it.copy(
+                        hasLoadedOnce = true,
+                        ordersTodayCount = d.ordersTodayCount, deliveredOrdersTodayCount = d.deliveredOrdersTodayCount,
+                        earningsTodaySum = d.earningsTodaySum, todayEarningsVendorAmount = d.todayEarningsVendorAmount?.let { s -> BigDecimal(s) },
+                        foodSalesTodayDelivered = d.foodSalesTodayDelivered, confirmedOrdersCount = d.confirmedOrdersCount,
+                        averageRating = d.averageRating, walletBalance = d.walletBalance, hasValidWalletBalance = d.hasValidWalletBalance,
+                        recentOrders = d.recentOrders, isLoading = false
+                    )
+                }
+            }
+        }
+    }
+
     private fun resetVendorData() {
+        LiveCache.clear()
         OrderAlertTracker.clear()
         _inAppOrderAlert.value = null
         _dashboardState.value = DashboardUiState()
@@ -640,6 +665,7 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
                 _profileState.update { it.copy(vendor = vendor) }
                 _dashboardState.update { it.copy(isStoreOpen = vendor.isOpen) }
                 if (loadData) {
+                    restoreFromCache(vendor.id)
                     refreshAll()
                     syncDeviceRegistration(vendor, takeOver = takeOverDevice)
                 }
@@ -841,6 +867,12 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
                             isLoading = false,
                             errorMessage = if (isWalletError && !hasValidWallet) "Failed to load wallet balance" else null
                         )
+                    }
+                    if (!isWalletError) {
+                        LiveCache.saveDashboard(vId, DashboardSnapshot(
+                            ordersTodayCount, deliveredOrdersTodayCount, todayEarningsVendorAmount?.toDouble() ?: 0.0, todayEarningsVendorAmount?.toPlainString(),
+                            foodSalesTodayDelivered, confirmedOrdersCount, if (avgRating.isNaN()) 0.0 else avgRating, balance, hasValidWallet, orders.take(10)
+                        ))
                     }
                 }
             } catch (e: Exception) {
@@ -1124,7 +1156,7 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
                         }
                     }
                     _menuState.update { it.copy(products = listOf(res.data) + it.products, isSubmitting = false) }
-                    showMenuSuccess("Item added to menu")
+                    showMenuSuccess(if (_vendorLabels.value.isHotel) "Item added to menu" else "Product added")
                     onComplete(true, null)
                 }
                 is Resource.Error -> {
@@ -1210,7 +1242,7 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
                             isSubmitting = false
                         )
                     }
-                    showMenuSuccess("Item updated")
+                    showMenuSuccess(if (_vendorLabels.value.isHotel) "Item updated" else "Product updated")
                     onComplete(true, null)
                 }
                 is Resource.Error -> {
@@ -1275,7 +1307,7 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
                             isSubmitting = false
                         )
                     }
-                    showMenuSuccess("Item deleted")
+                    showMenuSuccess(if (_vendorLabels.value.isHotel) "Item deleted" else "Product deleted")
                     onComplete(true, null)
                 }
                 is Resource.Error -> {
@@ -1309,6 +1341,7 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
                             errorMessage = null
                         )
                     }
+                    LiveCache.saveOrders(vId, res.data)
                     alertForNewConfirmedOrders(res.data)
                 }
                 is Resource.Error -> {
@@ -2511,7 +2544,7 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
             var foodPath = _registrationState.value.foodLicenseStoragePath
             if (foodPath.isNullOrBlank()) {
                 if (foodLicenseDoc == null) {
-                    val err = "Please select and upload your Food License document."
+                    val err = if (vendorType == "hotel") "Please select and upload your Food License document." else "Please select and upload your shop license document."
                     android.util.Log.e("VendorViewModel", err)
                     _registrationState.update { it.copy(isSubmittingRegistration = false, errorMessage = err) }
                     onComplete(false, err, null)
@@ -2532,7 +2565,7 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
                         }
                     }
                     is Resource.Error -> {
-                        val err = "Food License upload failed: ${uploadRes.message}"
+                        val err = (if (vendorType == "hotel") "Food License" else "License") + " upload failed: ${uploadRes.message}"
                         android.util.Log.e("VendorViewModel", err)
                         _registrationState.update {
                             it.copy(isUploadingFoodLicense = false, foodLicenseUploadError = uploadRes.message, errorMessage = err, isSubmittingRegistration = false)

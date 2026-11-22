@@ -134,6 +134,7 @@ fun BankDetailsDialog(
     var errorMsg by remember { mutableStateOf<String?>(null) }
 
     AlertDialog(
+        modifier = androidx.compose.ui.Modifier.then(com.example.util.TapFeedbackModifier),
         onDismissRequest = { if (!isSaving) onDismiss() },
         title = {
             Text(

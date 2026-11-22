@@ -239,8 +239,13 @@ data class Order(
     val city_id: String? = null,
     // Shops (Stores): a scheduled order has a chosen delivery window (UTC ISO)
     val scheduled_for: String? = null,
-    val scheduled_until: String? = null
+    val scheduled_until: String? = null,
+    // when the shop may start preparing a scheduled order (before this the server refuses "Preparing")
+    val prepare_from: String? = null
 ) {
+    val isScheduled: Boolean get() = !scheduled_for.isNullOrBlank()
+    val scheduledForMillis: Long? get() = parseIsoMillis(scheduled_for)
+    val prepareFromMillis: Long? get() = parseIsoMillis(prepare_from)
     val orderNumber: String? get() = order_number
     val discountAmount: Double? get() = discount_amount
     val deliveryFee: Double? get() = delivery_fee
@@ -554,3 +559,29 @@ data class StoreCategoryInfo(
     @Json(name = "name_kn") val nameKn: String? = null,
     val template: String? = null
 )
+
+
+/** The dashboard numbers as saved on the phone (see LiveCache). */
+@JsonClass(generateAdapter = true)
+data class DashboardSnapshot(
+    val ordersTodayCount: Int = 0,
+    val deliveredOrdersTodayCount: Int = 0,
+    val earningsTodaySum: Double = 0.0,
+    val todayEarningsVendorAmount: String? = null,
+    val foodSalesTodayDelivered: Double = 0.0,
+    val confirmedOrdersCount: Int = 0,
+    val averageRating: Double = 0.0,
+    val walletBalance: Double = 0.0,
+    val hasValidWalletBalance: Boolean = false,
+    val recentOrders: List<Order> = emptyList()
+)
+
+
+/** "2026-11-23T04:30:00+00:00" (UTC) -> epoch millis; null when missing or unreadable. */
+internal fun parseIsoMillis(iso: String?): Long? {
+    if (iso.isNullOrBlank()) return null
+    return try {
+        java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US).apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
+            .parse(iso.take(19))?.time
+    } catch (_: Exception) { null }
+}
