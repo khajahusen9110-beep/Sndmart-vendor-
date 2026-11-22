@@ -316,7 +316,7 @@ fun EarningsScreen(
                                     color = PolishEmeraldLight
                                 )
                                 Text(
-                                    text = "Commission: ${state.commissionPercent.toInt()}% on payout",
+                                    text = "Balance is after commission",
                                     fontSize = 10.sp,
                                     color = Color.White.copy(alpha = 0.7f),
                                     maxLines = 1,
@@ -459,7 +459,7 @@ fun EarningsScreen(
                                 lineHeight = 16.sp
                             )
                             Text(
-                                text = "• Commission (${state.commissionPercent.toInt()}%) is deducted when your withdrawal is paid out to your payout account (bank or UPI).",
+                                text = "• Your wallet shows only your own share: item amount minus commission. Handling, platform and delivery fees never come to the vendor. A payout is paid in full, with no second cut.",
                                 fontSize = 12.sp,
                                 color = Slate700,
                                 lineHeight = 16.sp
@@ -673,7 +673,7 @@ fun EarningsScreen(
                     items(state.withdrawals, key = { it.id }) { withdrawal ->
                         TabListItem {
                             val commRate = state.commissionPercent
-                            val commAmount = withdrawal.commissionAmount ?: (withdrawal.amount * commRate / 100.0)
+                            val commAmount = withdrawal.commissionAmount ?: 0.0
                             val netPayable = withdrawal.netPayableAmount ?: (withdrawal.amount - commAmount)
 
                             Surface(
@@ -762,11 +762,11 @@ fun EarningsScreen(
                                                         Text("Requested:", fontSize = 11.5.sp, color = Slate600)
                                                         Text(CurrencyFormatter.format(withdrawal.amount), fontSize = 11.5.sp, color = Slate700)
                                                     }
-                                                    Row(
+                                                    if (commAmount > 0.0) Row(
                                                         modifier = Modifier.fillMaxWidth(),
                                                         horizontalArrangement = Arrangement.SpaceBetween
                                                     ) {
-                                                        Text("Commission (${commRate.toInt()}%):", fontSize = 11.5.sp, color = PolishRoseDark)
+                                                        Text("Commission (older payout):", fontSize = 11.5.sp, color = PolishRoseDark)
                                                         Text("-${CurrencyFormatter.format(commAmount)}", fontSize = 11.5.sp, color = PolishRoseDark, fontWeight = FontWeight.SemiBold)
                                                     }
                                                     HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp), color = PolishEmeraldDark.copy(alpha = 0.2f))
@@ -941,15 +941,12 @@ fun EarningsScreen(
 
         if (showConfirmSubmit) {
             val amount = parsedAmount ?: 0.0
-            val estCommission = amount * (commPercent / 100.0)
-            val estNet = amount - estCommission
-
             ConfirmationDialog(
                 title = "Confirm Withdrawal",
                 message = "Are you sure you want to request a payout of ${CurrencyFormatter.format(amount)} to your payout account?\n\n" +
                         "• Requested: ${CurrencyFormatter.format(amount)}\n" +
-                        "• Commission (${commPercent.toInt()}%): -${CurrencyFormatter.format(estCommission)}\n" +
-                        "• You will receive: ${CurrencyFormatter.format(estNet)}" +
+                        "• Commission: already deducted from your orders\n" +
+                        "• You will receive: ${CurrencyFormatter.format(amount)}" +
                         (payoutAccount?.let { "\n• Paid to: ${it.summary}" } ?: ""),
                 confirmText = "Submit Request",
                 isLoading = state.isSubmittingWithdrawal || isSubmittingLocally,
@@ -1082,7 +1079,7 @@ fun EarningsScreen(
                                         color = Slate500
                                     )
                                     Text(
-                                        text = "Commission: ${commPercent.toInt()}%",
+                                        text = "After commission",
                                         fontSize = 11.sp,
                                         color = Slate600,
                                         fontWeight = FontWeight.SemiBold
@@ -1232,9 +1229,6 @@ fun EarningsScreen(
 
                                 // Real-time calculation card (Rule 2)
                                 if (parsedAmount != null && parsedAmount > 0) {
-                                    val estCommission = parsedAmount * (commPercent / 100.0)
-                                    val estNet = (parsedAmount - estCommission).coerceAtLeast(0.0)
-
                                     Surface(
                                         shape = RoundedCornerShape(12.dp),
                                         color = PolishBackgroundLight,
@@ -1252,16 +1246,9 @@ fun EarningsScreen(
                                                 Text("Requested Amount:", fontSize = 12.sp, color = Slate600)
                                                 Text(CurrencyFormatter.format(parsedAmount), fontSize = 12.sp, color = Slate800, fontWeight = FontWeight.SemiBold)
                                             }
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.SpaceBetween
-                                            ) {
-                                                Text("Commission (${commPercent.toInt()}%):", fontSize = 12.sp, color = PolishRoseDark)
-                                                Text("-${CurrencyFormatter.format(estCommission)}", fontSize = 12.sp, color = PolishRoseDark, fontWeight = FontWeight.SemiBold)
-                                            }
                                             HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp), color = PolishBorderLight)
                                             Text(
-                                                text = "You will receive approx ${CurrencyFormatter.format(estNet)} after ${commPercent.toInt()}% commission (final amount is decided when paid).",
+                                                text = "You will receive ${CurrencyFormatter.format(parsedAmount)}. Commission is already deducted from your order amounts.",
                                                 fontSize = 12.sp,
                                                 fontWeight = FontWeight.Bold,
                                                 color = PolishEmeraldDark,
