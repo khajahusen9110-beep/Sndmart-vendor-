@@ -345,6 +345,11 @@ fun OrdersScreen(
                                         fontWeight = FontWeight.Bold,
                                         color = Slate900
                                     )
+                                    scheduledWindowLabel(order.scheduled_for, order.scheduled_until)?.let { w ->
+                                        Surface(color = PolishAmberLight, shape = RoundedCornerShape(6.dp), border = BorderStroke(1.dp, PolishAmber)) {
+                                            Text("⏰ $w", modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = PolishAmberDark)
+                                        }
+                                    }
                                     if (isConfirmed) {
                                         Surface(
                                             color = PolishAmberDark,
@@ -746,6 +751,20 @@ fun OrdersScreen(
                         }
                     }
 
+                    // Scheduled shop order: deliver in the chosen window; start preparing shortly before it
+                    scheduledWindowLabel(order.scheduled_for, order.scheduled_until)?.let { w ->
+                        item {
+                            Surface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp), color = PolishAmberLight, border = BorderStroke(1.dp, PolishAmber)) {
+                                Column(modifier = Modifier.padding(12.dp)) {
+                                    Text("⏰ Scheduled delivery", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = PolishAmberDark)
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(w, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Slate900)
+                                    Text("Accept now. Start preparing close to this time. The delivery partner is called when you tap Preparing.", fontSize = 12.sp, color = Slate700)
+                                }
+                            }
+                        }
+                    }
+
                     // Cooking instructions from the customer (for the kitchen)
                     order.cookingInstructions?.let { ci ->
                         item {
@@ -1081,6 +1100,22 @@ private fun OrderDayHeader(day: String) {
         )
         HorizontalDivider(modifier = Modifier.weight(1f), color = PolishBorderLight)
     }
+}
+
+/** "Today 4 PM - 6 PM" / "23 Nov 4 PM - 6 PM" for a scheduled shop order, or null for a normal order. */
+private fun scheduledWindowLabel(fromIso: String?, untilIso: String?): String? {
+    if (fromIso.isNullOrBlank()) return null
+    return try {
+        val utc = java.util.TimeZone.getTimeZone("UTC")
+        val ist = java.util.TimeZone.getTimeZone("Asia/Kolkata")
+        val parser = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US).apply { timeZone = utc }
+        val from = parser.parse(fromIso.take(19)) ?: return null
+        val until = untilIso?.takeIf { it.isNotBlank() }?.let { parser.parse(it.take(19)) }
+        val day = java.text.SimpleDateFormat("d MMM", java.util.Locale.ENGLISH).apply { timeZone = ist }
+        val tm = java.text.SimpleDateFormat("h:mm a", java.util.Locale.ENGLISH).apply { timeZone = ist }
+        val today = day.format(java.util.Date()) == day.format(from)
+        (if (today) "Today" else day.format(from)) + " " + tm.format(from) + (until?.let { " - " + tm.format(it) } ?: "")
+    } catch (_: Exception) { null }
 }
 
 private fun formatStatusTime(isoString: String): String {

@@ -223,7 +223,10 @@ data class Order(
     val address_id: String? = null,
     val slot_id: String? = null,
     val placed_at: String? = null,
-    val city_id: String? = null
+    val city_id: String? = null,
+    // Shops (Stores): a scheduled order has a chosen delivery window (UTC ISO)
+    val scheduled_for: String? = null,
+    val scheduled_until: String? = null
 ) {
     val orderNumber: String? get() = order_number
     val discountAmount: Double? get() = discount_amount
