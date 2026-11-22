@@ -446,6 +446,19 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun handleSessionExpired(reason: String = "Your session expired, please log in again") {
+        // A 401 can come from a bad network moment, not only from a really ended session. Before logging out for the
+        // generic reason, ask the server once (shared, locked refresh). Only a real refusal logs the vendor out.
+        if (reason == "Your session expired, please log in again" && sessionManager.hasValidRefreshToken) {
+            viewModelScope.launch {
+                val r = repository.validateOrRefreshSession()
+                if (r is Resource.Error && r.code == 401) endSessionNow(reason)
+            }
+            return
+        }
+        endSessionNow(reason)
+    }
+
+    private fun endSessionNow(reason: String) {
         stopAutoPolling()
         repository.logout()
         resetVendorData()

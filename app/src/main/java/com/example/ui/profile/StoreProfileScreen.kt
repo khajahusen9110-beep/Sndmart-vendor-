@@ -100,11 +100,6 @@ fun StoreProfileScreen(
                         Icon(imageVector = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
-                actions = {
-                    IconButton(onClick = { showLogoutConfirmation = true }) {
-                        Icon(imageVector = Icons.Default.Logout, contentDescription = "Sign Out", tint = MaterialTheme.colorScheme.error)
-                    }
-                },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
             )
         },
@@ -949,9 +944,9 @@ fun StoreProfileScreen(
     // Logout Confirmation Dialog
     if (showLogoutConfirmation) {
         ConfirmationDialog(
-            title = "Sign Out",
-            message = "Are you sure you want to sign out of your vendor account?",
-            confirmText = "Sign Out",
+            title = "Confirm Logout",
+            message = "Do you want to log out of your vendor account? You will need to log in again to receive orders.",
+            confirmText = "Yes, Log out",
             isDestructive = true,
             onConfirm = {
                 showLogoutConfirmation = false

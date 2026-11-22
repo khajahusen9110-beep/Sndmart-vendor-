@@ -19,7 +19,65 @@ import java.util.concurrent.TimeUnit
 
 class SupabaseClient(private val sessionManager: SessionManager) {
 
+    enum class RefreshOutcome { OK, EXPIRED, TRANSIENT }
+
     companion object {
+        /**
+         * One lock for the whole app process. The app has several SupabaseClient instances (screen, incoming-order
+         * screen, push service); each used to refresh with its own lock, so two refreshes could run together and
+         * the second one used an already-rotated refresh token, which the server answers by ending the session.
+         */
+        private val refreshLock = Any()
+
+        /**
+         * The only place that rotates the refresh token.
+         * OK = a valid token is stored now. EXPIRED = the server really refused the session (log in again).
+         * TRANSIENT = network trouble / server busy: the session is NOT lost, try again later.
+         */
+        fun refreshSession(sessionManager: SessionManager, staleAccessToken: String? = null): RefreshOutcome =
+            synchronized(refreshLock) {
+                // another caller already refreshed while this one waited for the lock
+                val current = sessionManager.accessToken
+                if (!current.isNullOrBlank() && staleAccessToken != null && current != staleAccessToken &&
+                    !sessionManager.isTokenExpiredOrExpiringSoon(30)) return RefreshOutcome.OK
+                val rt = sessionManager.refreshToken
+                if (rt.isNullOrBlank()) return RefreshOutcome.EXPIRED
+                try {
+                    val base = resolveBaseUrl().let { if (it.endsWith("/")) it else "$it/" }
+                    val anon = resolveAnonKey()
+                    val req = Request.Builder().url("${base}auth/v1/token?grant_type=refresh_token")
+                        .post(org.json.JSONObject().put("refresh_token", rt).toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
+                        .header("apikey", anon).header("Authorization", "Bearer $anon")
+                        .header("Content-Type", "application/json").header("Accept", "application/json").build()
+                    val client = OkHttpClient.Builder().connectTimeout(20, TimeUnit.SECONDS).readTimeout(20, TimeUnit.SECONDS).build()
+                    client.newCall(req).execute().use { response ->
+                        val text = response.body?.string().orEmpty()
+                        if (response.isSuccessful) {
+                            val json = org.json.JSONObject(text)
+                            val access = json.optString("access_token")
+                            if (access.isBlank()) return RefreshOutcome.TRANSIENT
+                            sessionManager.updateTokens(
+                                newAccessToken = access,
+                                newRefreshToken = json.optString("refresh_token").takeIf { it.isNotBlank() },
+                                expiresInSeconds = json.optLong("expires_in", 3600L)
+                            )
+                            json.optJSONObject("user")?.optString("id")?.takeIf { it.isNotBlank() }?.let { sessionManager.userId = it }
+                            return RefreshOutcome.OK
+                        }
+                        android.util.Log.w("SupabaseClient", "Session refresh failed: HTTP ${response.code} - $text")
+                        if (response.code == 400 || response.code == 401 || response.code == 403) {
+                            // If a newer token was stored meanwhile (login or another refresh), this failure is about the old one.
+                            val nowRt = sessionManager.refreshToken
+                            return if (!nowRt.isNullOrBlank() && nowRt != rt) RefreshOutcome.OK else RefreshOutcome.EXPIRED
+                        }
+                        return RefreshOutcome.TRANSIENT // 429 / 5xx: the server is busy, the session is fine
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.w("SupabaseClient", "Token refresh network error: ${e.message}")
+                    return RefreshOutcome.TRANSIENT // no network: never log the vendor out for this
+                }
+            }
+
         private const val DEFAULT_BASE_URL = "https://zennmoughfhennwgecgo.supabase.co/"
 
         // Public (anon) key of the Sndmart Supabase project. It is safe to ship in the app;
@@ -73,113 +131,33 @@ class SupabaseClient(private val sessionManager: SessionManager) {
     }
 
     private val tokenAuthenticator = object : Authenticator {
-        private val lock = Any()
-
         override fun authenticate(route: Route?, response: Response): Request? {
             // Guard against infinite loop
-            if (responseCount(response) >= 3) {
-                return null
-            }
+            if (responseCount(response) >= 3) return null
 
             // Never try to re-authenticate the auth endpoints themselves
             val path = response.request.url.encodedPath
-            if (path.contains("auth/v1/token") || path.contains("auth/v1/signup") || path.contains("auth/v1/verify")) {
-                return null
-            }
+            if (path.contains("auth/v1/token") || path.contains("auth/v1/signup") || path.contains("auth/v1/verify")) return null
 
-            val storedRefreshToken = sessionManager.refreshToken
-            if (storedRefreshToken.isNullOrBlank()) {
+            if (sessionManager.refreshToken.isNullOrBlank()) {
                 sessionManager.notifySessionExpired("Your session expired, please log in again")
                 return null
             }
-
-            synchronized(lock) {
-                val currentToken = sessionManager.accessToken
-                val priorTokenSent = response.request.header("Authorization")?.removePrefix("Bearer ")?.trim()
-
-                // If another concurrent request already refreshed the token, retry immediately with new token
-                if (!currentToken.isNullOrBlank() && currentToken != priorTokenSent) {
-                    val anonKey = resolveAnonKey()
-                    return response.request.newBuilder()
-                        .header("apikey", anonKey)
-                        .header("Authorization", "Bearer $currentToken")
-                        .build()
-                }
-
-                // Call Supabase GoTrue to refresh token
-                val refreshed = refreshTokensSynchronously(storedRefreshToken)
-                if (refreshed) {
+            val priorTokenSent = response.request.header("Authorization")?.removePrefix("Bearer ")?.trim()
+            return when (refreshSession(sessionManager, priorTokenSent)) {
+                RefreshOutcome.OK -> {
                     val newToken = sessionManager.accessToken ?: return null
-                    val anonKey = resolveAnonKey()
-                    return response.request.newBuilder()
-                        .header("apikey", anonKey)
+                    response.request.newBuilder()
+                        .header("apikey", resolveAnonKey())
                         .header("Authorization", "Bearer $newToken")
                         .build()
-                } else {
-                    return null
                 }
-            }
-        }
-    }
-
-    private fun refreshTokensSynchronously(refreshToken: String): Boolean {
-        return try {
-            val anonKey = resolveAnonKey()
-            val baseUrl = resolveBaseUrl()
-            val cleanBaseUrl = if (baseUrl.endsWith("/")) baseUrl else "$baseUrl/"
-            val url = "${cleanBaseUrl}auth/v1/token?grant_type=refresh_token"
-
-            val jsonBody = """{"refresh_token":"$refreshToken"}"""
-            val body = jsonBody.toRequestBody("application/json; charset=utf-8".toMediaType())
-
-            val refreshRequest = Request.Builder()
-                .url(url)
-                .post(body)
-                .header("apikey", anonKey)
-                .header("Authorization", "Bearer $anonKey")
-                .header("Content-Type", "application/json")
-                .header("Accept", "application/json")
-                .build()
-
-            val cleanClient = OkHttpClient.Builder()
-                .connectTimeout(15, TimeUnit.SECONDS)
-                .readTimeout(15, TimeUnit.SECONDS)
-                .build()
-
-            val response = cleanClient.newCall(refreshRequest).execute()
-            if (response.isSuccessful) {
-                val responseStr = response.body?.string() ?: return false
-                val json = org.json.JSONObject(responseStr)
-                val newAccessToken = json.optString("access_token")
-                val newRefreshToken = json.optString("refresh_token")
-                val expiresIn = json.optLong("expires_in", 3600L)
-                val userObj = json.optJSONObject("user")
-                val userId = userObj?.optString("id")
-
-                if (newAccessToken.isNotBlank()) {
-                    sessionManager.updateTokens(
-                        newAccessToken = newAccessToken,
-                        newRefreshToken = if (newRefreshToken.isNotBlank()) newRefreshToken else null,
-                        expiresInSeconds = expiresIn
-                    )
-                    if (!userId.isNullOrBlank()) {
-                        sessionManager.userId = userId
-                    }
-                    android.util.Log.i("SupabaseClient", "Session token auto-refreshed successfully.")
-                    return true
-                }
-            } else {
-                val code = response.code
-                val errBody = response.body?.string() ?: ""
-                android.util.Log.w("SupabaseClient", "Session refresh failed: HTTP $code - $errBody")
-                if (code == 400 || code == 401 || code == 403) {
+                RefreshOutcome.EXPIRED -> {
                     sessionManager.notifySessionExpired("Your session expired, please log in again")
+                    null
                 }
+                RefreshOutcome.TRANSIENT -> null // request fails for now; the session stays
             }
-            false
-        } catch (e: Exception) {
-            android.util.Log.e("SupabaseClient", "Exception during token refresh", e)
-            false
         }
     }
 

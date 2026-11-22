@@ -195,43 +195,23 @@ class VendorRepository(
     }
 
     suspend fun validateOrRefreshSession(): Resource<Boolean> = withContext(Dispatchers.IO) {
-        val refreshToken = sessionManager.refreshToken
-        if (refreshToken.isNullOrBlank() || sessionManager.userId.isNullOrBlank()) {
+        if (sessionManager.refreshToken.isNullOrBlank() || sessionManager.userId.isNullOrBlank()) {
             sessionManager.clearSession()
             return@withContext Resource.Error("No active session found", 401)
         }
-
-        try {
-            val response = api.refreshToken(mapOf("refresh_token" to refreshToken))
-            if (response.isSuccessful) {
-                val body = response.body()
-                if (body?.accessToken != null) {
-                    sessionManager.updateTokens(
-                        newAccessToken = body.accessToken,
-                        newRefreshToken = body.refreshToken,
-                        expiresInSeconds = body.expiresIn
-                    )
-                    if (body.user?.id != null) {
-                        sessionManager.userId = body.user.id
-                    }
-                    sessionManager.sessionExpiredMessage = null
-                    Resource.Success(true)
-                } else {
-                    Resource.Error("Token refresh succeeded without access token", 500)
-                }
-            } else {
-                val code = response.code()
-                val errBody = response.errorBody()?.string() ?: ""
-                if (code == 400 || code == 401 || code == 403) {
-                    sessionManager.clearSession()
-                    sessionManager.notifySessionExpired("Your session expired, please log in again")
-                    Resource.Error("Your session expired, please log in again", 401)
-                } else {
-                    Resource.Error("Session check failed: $errBody", code)
-                }
+        // Same single, locked refresh the network layer uses. Only a real refusal by the server (EXPIRED) ends the
+        // session; a bad network or a busy server (TRANSIENT) never logs the vendor out.
+        when (SupabaseClient.refreshSession(sessionManager)) {
+            SupabaseClient.RefreshOutcome.OK -> {
+                sessionManager.sessionExpiredMessage = null
+                Resource.Success(true)
             }
-        } catch (e: Exception) {
-            Resource.Error(e.localizedMessage ?: "Network error checking session")
+            SupabaseClient.RefreshOutcome.EXPIRED -> {
+                sessionManager.clearSession()
+                sessionManager.notifySessionExpired("Your session expired, please log in again")
+                Resource.Error("Your session expired, please log in again", 401)
+            }
+            SupabaseClient.RefreshOutcome.TRANSIENT -> Resource.Error("Could not check the session (network). Please try again.", 503)
         }
     }
 
