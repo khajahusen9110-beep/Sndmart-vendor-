@@ -387,6 +387,7 @@ fun MainVendorApp(
     }
     var showingProfileScreen by remember { mutableStateOf(false) }
     var showingRegisterScreen by remember { mutableStateOf(false) }
+    var showingForgotScreen by remember { mutableStateOf(false) }
 
     Box(modifier = modifier.fillMaxSize().globalTapFeedback()) {
         when (val state = authState) {
@@ -420,8 +421,21 @@ fun MainVendorApp(
                             onNavigateBackToLogin = { showingRegisterScreen = false },
                             modifier = Modifier.fillMaxSize()
                         )
+                    } else if (showingForgotScreen) {
+                        com.example.ui.auth.ForgotPasswordScreen(
+                            onRequestOtp = { phone, onResult -> viewModel.requestPasswordResetOtp(phone, onResult) },
+                            onReset = { phone, otp, pass, onResult ->
+                                viewModel.resetPassword(phone, otp, pass) { ok, msg ->
+                                    if (ok) showingForgotScreen = false
+                                    onResult(ok, msg)
+                                }
+                            },
+                            onBack = { showingForgotScreen = false },
+                            modifier = Modifier.fillMaxSize()
+                        )
                     } else {
                         LoginScreen(
+                            onForgotPassword = { showingForgotScreen = true },
                             onLogin = { email, password, onComplete ->
                                 viewModel.login(email, password, onComplete)
                             },

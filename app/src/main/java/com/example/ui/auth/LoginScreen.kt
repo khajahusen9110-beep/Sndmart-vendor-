@@ -34,6 +34,7 @@ import com.example.ui.theme.*
 fun LoginScreen(
     onLogin: (identifier: String, password: String, onComplete: (Boolean, String?) -> Unit) -> Unit,
     onNavigateToRegister: () -> Unit = {},
+    onForgotPassword: () -> Unit = {},
     sessionNotice: String? = null,
     onClearSessionNotice: () -> Unit = {},
     modifier: Modifier = Modifier
@@ -216,7 +217,9 @@ fun LoginScreen(
                         shape = RoundedCornerShape(14.dp)
                     )
 
-                    Spacer(modifier = Modifier.height(4.dp))
+                    TextButton(onClick = onForgotPassword, modifier = Modifier.align(Alignment.End), contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)) {
+                        Text("Forgot password?", fontWeight = FontWeight.SemiBold, color = SprucePrimary, fontSize = 13.sp)
+                    }
 
                     Button(
                         onClick = {

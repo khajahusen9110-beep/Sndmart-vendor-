@@ -1230,6 +1230,64 @@ class VendorRepository(
         }
     }
 
+    /**
+     * Forgot password, step 1: sends a 6-digit OTP to the vendor's WhatsApp number (SMS if WhatsApp cannot deliver).
+     * Only existing accounts get a code: no new account is ever created from here.
+     */
+    suspend fun requestPasswordResetOtp(phone: String): Resource<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            val digits = phone.filter { it.isDigit() }.takeLast(10)
+            if (digits.length != 10) return@withContext Resource.Error("Please enter your 10-digit mobile number.")
+            val res = api.sendPhoneOtp(mapOf("phone" to "+91$digits", "create_user" to false))
+            if (res.isSuccessful) Resource.Success(true)
+            else {
+                val raw = try { res.errorBody()?.string().orEmpty() } catch (_: Exception) { "" }
+                val msg = when {
+                    res.code() == 429 || raw.contains("rate", ignoreCase = true) || raw.contains("too many", ignoreCase = true) ->
+                        "Too many OTP requests. Please wait a minute and try again."
+                    res.code() == 422 || raw.contains("not allowed", ignoreCase = true) || raw.contains("not found", ignoreCase = true) ->
+                        "This mobile number is not registered with Sndmart Vendor."
+                    else -> "Could not send the OTP right now. Please try again."
+                }
+                Resource.Error(msg, res.code())
+            }
+        } catch (e: Exception) {
+            Resource.Error("No internet connection. Please try again.")
+        }
+    }
+
+    /**
+     * Forgot password, step 2: checks the OTP, sets the new password and signs the vendor in with it
+     * (which also signs out any other phone, as a password reset should).
+     */
+    suspend fun resetPasswordWithOtp(phone: String, otp: String, newPassword: String): Resource<Vendor> = withContext(Dispatchers.IO) {
+        try {
+            val digits = phone.filter { it.isDigit() }.takeLast(10)
+            when (val verified = verifyPhoneOtp(digits, otp)) {
+                is Resource.Error -> return@withContext Resource.Error(
+                    if (verified.code == 400 || verified.code == 401 || verified.code == 403 || verified.code == 422) "That OTP is wrong or has expired. Please check it or ask for a new one." else verified.message,
+                    verified.code
+                )
+                else -> {}
+            }
+            val res = api.updateAuthUser(mapOf("password" to newPassword))
+            if (!res.isSuccessful) {
+                val raw = try { res.errorBody()?.string().orEmpty() } catch (_: Exception) { "" }
+                sessionManager.clearSession()
+                return@withContext Resource.Error(
+                    if (raw.contains("different", ignoreCase = true)) "Please choose a password different from your old one."
+                    else if (raw.contains("weak", ignoreCase = true) || raw.contains("characters", ignoreCase = true)) "That password is too weak. Use at least 6 characters."
+                    else "Could not change the password. Please try again.",
+                    res.code()
+                )
+            }
+            sessionManager.clearSession()
+            login(digits, newPassword)
+        } catch (e: Exception) {
+            Resource.Error("No internet connection. Please try again.")
+        }
+    }
+
     private fun formatPhoneWithCountryCode(phone: String): String {
         val digitsOnly = phone.trim().filter { it.isDigit() }
         return when {

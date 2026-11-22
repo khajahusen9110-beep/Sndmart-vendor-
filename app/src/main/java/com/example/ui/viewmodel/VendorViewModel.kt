@@ -653,6 +653,31 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    /** Forgot password, step 1: WhatsApp OTP to the vendor's number. */
+    fun requestPasswordResetOtp(phone: String, onResult: (Boolean, String?) -> Unit) {
+        viewModelScope.launch {
+            when (val r = repository.requestPasswordResetOtp(phone)) {
+                is Resource.Success -> onResult(true, null)
+                is Resource.Error -> onResult(false, r.message)
+                Resource.Loading -> {}
+            }
+        }
+    }
+
+    /** Forgot password, step 2: OTP + new password; on success the vendor is signed in. */
+    fun resetPassword(phone: String, otp: String, newPassword: String, onResult: (Boolean, String?) -> Unit) {
+        viewModelScope.launch {
+            when (val r = repository.resetPasswordWithOtp(phone, otp, newPassword)) {
+                is Resource.Success -> {
+                    processVendorStatus(r.data, takeOverDevice = true)
+                    onResult(true, null)
+                }
+                is Resource.Error -> onResult(false, r.message)
+                Resource.Loading -> {}
+            }
+        }
+    }
+
     fun logout() {
         val currentVendor = (_authUiState.value as? AuthUiState.Authenticated)?.vendor
             ?: sessionManager.cachedVendor

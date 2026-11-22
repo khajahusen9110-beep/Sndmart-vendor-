@@ -28,6 +28,14 @@ interface SupabaseApi {
         @Body request: Map<String, String>
     ): Response<AuthResponse>
 
+    // Sends a login OTP to an existing user's phone (WhatsApp first, SMS as backup: the server's send-sms-hook does it)
+    @POST("auth/v1/otp")
+    suspend fun sendPhoneOtp(@Body body: Map<String, @JvmSuppressWildcards Any?>): Response<okhttp3.ResponseBody>
+
+    // Changes the signed-in user's password
+    @PUT("auth/v1/user")
+    suspend fun updateAuthUser(@Body body: Map<String, @JvmSuppressWildcards Any?>): Response<okhttp3.ResponseBody>
+
     @GET("auth/v1/user")
     suspend fun getAuthUser(): Response<AuthUser>
 
