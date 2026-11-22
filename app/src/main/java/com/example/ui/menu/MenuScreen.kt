@@ -63,10 +63,11 @@ private val TIME_OF_DAY_REGEX = Regex("^([01]?\\d|2[0-3]):[0-5]\\d(:[0-5]\\d)?$"
 @Composable
 fun MenuScreen(
     state: MenuUiState,
+    isShop: Boolean = false,
     onAddCategory: (name: String, imageUrl: String, onComplete: (Boolean, String?) -> Unit) -> Unit,
     onUpdateCategory: (id: String, name: String, imageUrl: String, onComplete: (Boolean, String?) -> Unit) -> Unit,
     onDeleteCategory: (id: String, onComplete: (Boolean, String?) -> Unit) -> Unit,
-    onAddProduct: (categoryId: String?, name: String, description: String?, price: Double, imageUrl: String?, isActive: Boolean, availableFrom: String?, availableUntil: String?, stockQty: Int, isAvailable: Boolean, onComplete: (Boolean, String?) -> Unit) -> Unit,
+    onAddProduct: (categoryId: String?, name: String, description: String?, price: Double, imageUrl: String?, isActive: Boolean, availableFrom: String?, availableUntil: String?, stockQty: Int, isAvailable: Boolean, unit: String?, onComplete: (Boolean, String?) -> Unit) -> Unit,
     onUpdateProduct: (productId: String, updates: Map<String, Any?>, onComplete: (Boolean, String?) -> Unit) -> Unit,
     onToggleProductActive: (Product) -> Unit,
     onDeleteProduct: (productId: String, onComplete: (Boolean, String?) -> Unit) -> Unit,
@@ -1314,6 +1315,7 @@ fun MenuScreen(
         var categoryId by remember { mutableStateOf(editingProduct?.categoryId ?: state.categories.firstOrNull()?.id) }
         var priceStr by remember { mutableStateOf(if (isEdit) editingProduct!!.price.toString() else "") }
         var description by remember { mutableStateOf(editingProduct?.description ?: "") }
+        var unitStr by remember { mutableStateOf(editingProduct?.unit?.takeIf { it != "piece" } ?: "") }
         var imageUrl by remember { mutableStateOf(editingProduct?.imageUrl ?: "") }
         var selectedProductPhoto by remember { mutableStateOf<SelectedImageFile?>(null) }
         var isUploadingProductPhoto by remember { mutableStateOf(false) }
@@ -1484,6 +1486,21 @@ fun MenuScreen(
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(10.dp)
                         )
+                    }
+
+                    // Unit / pack size (shops only): "500 g", "1 kg", "1 litre"...
+                    if (isShop) {
+                        item {
+                            OutlinedTextField(
+                                value = unitStr,
+                                onValueChange = { unitStr = it; errorMsg = null },
+                                label = { Text("Quantity / Unit (e.g. 500 g, 1 kg, 1 litre)") },
+                                singleLine = true,
+                                colors = polishTextFieldColors(),
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(10.dp)
+                            )
+                        }
                     }
 
                     // Description
@@ -1726,6 +1743,7 @@ fun MenuScreen(
                                             "image_url" to uploadedUrl
                                         )
                                         if (categoryId != null) updates["category_id"] = categoryId
+                                        if (isShop) updates["unit"] = unitStr.trim().ifBlank { "piece" }
                                         updates["description"] = description.ifBlank { null }
 
                                         onUpdateProduct(editingProduct!!.id, updates) { pSuccess, pErr ->
@@ -1744,7 +1762,8 @@ fun MenuScreen(
                                             availableFrom.ifBlank { null },
                                             availableUntil.ifBlank { null },
                                             finalStock,
-                                            isActive && finalStock > 0
+                                            isActive && finalStock > 0,
+                                            if (isShop) unitStr.trim().ifBlank { null } else null
                                         ) { pSuccess, pErr ->
                                             isSubmitting = false
                                             if (pSuccess) showAddProductDialog = false
@@ -1768,6 +1787,7 @@ fun MenuScreen(
                                     "is_available" to (isActive && finalStock > 0)
                                 )
                                 if (categoryId != null) updates["category_id"] = categoryId
+                                if (isShop) updates["unit"] = unitStr.trim().ifBlank { "piece" }
                                 updates["description"] = description.ifBlank { null }
                                 updates["image_url"] = imageUrl.ifBlank { null }
 
@@ -1787,7 +1807,8 @@ fun MenuScreen(
                                     availableFrom.ifBlank { null },
                                     availableUntil.ifBlank { null },
                                     finalStock,
-                                    isActive && finalStock > 0
+                                    isActive && finalStock > 0,
+                                    if (isShop) unitStr.trim().ifBlank { null } else null
                                 ) { success, err ->
                                     isSubmitting = false
                                     if (success) showAddProductDialog = false

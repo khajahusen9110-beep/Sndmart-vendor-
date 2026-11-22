@@ -585,6 +585,7 @@ fun MainVendorApp(
                                 VendorNavTab.MENU -> {
                                     MenuScreen(
                                         state = menuState,
+                                        isShop = (vendor.vendorType ?: "hotel") != "hotel",
                                         onAddCategory = { name, imageUrl, onComplete ->
                                             viewModel.addCategory(name, imageUrl, onComplete)
                                         },
@@ -594,8 +595,8 @@ fun MainVendorApp(
                                         onDeleteCategory = { id, onComplete ->
                                             viewModel.deleteCategory(id, onComplete)
                                         },
-                                        onAddProduct = { catId, name, desc, price, img, active, from, until, stock, isAvail, onComplete ->
-                                            viewModel.addProduct(catId, name, desc, price, img, active, from, until, stock, isAvail, onComplete)
+                                        onAddProduct = { catId, name, desc, price, img, active, from, until, stock, isAvail, unit, onComplete ->
+                                            viewModel.addProduct(catId, name, desc, price, img, active, from, until, stock, isAvail, unit, onComplete)
                                         },
                                         onUpdateProduct = { prodId, updates, onComplete ->
                                             viewModel.updateProduct(prodId, updates, onComplete)
