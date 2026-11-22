@@ -24,6 +24,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.model.Vendor
@@ -76,9 +77,23 @@ class MainActivity : ComponentActivity() {
             .edit().putBoolean("fullscreen_prompt_skipped", value).apply()
     }
 
-    // The permission screen blocks only on the first run when it's required and not yet skipped.
+    // The full-screen permission screen is shown ONCE: never again after the vendor allowed it or skipped it. Some phones
+    // switch the permission off again by themselves after a while; that used to bring the blocking screen back every time.
+    // Now it only shows a small reminder strip (see fullScreenLost) that the vendor can close.
+    private var fullScreenEverGranted = false
+    private var fullScreenLost by mutableStateOf(false)
+    private var fullScreenBannerDismissed by mutableStateOf(false)
+
+    private fun readFullScreenEverGranted(): Boolean =
+        getSharedPreferences("sndmart_vendor_prefs", Context.MODE_PRIVATE).getBoolean("fullscreen_ever_granted", false)
+
+    private fun setFullScreenEverGranted() {
+        fullScreenEverGranted = true
+        getSharedPreferences("sndmart_vendor_prefs", Context.MODE_PRIVATE).edit().putBoolean("fullscreen_ever_granted", true).apply()
+    }
+
     private fun shouldGateFullScreen(): Boolean =
-        NotificationHelper.isFullScreenPermissionRequired(this) && !fullScreenPromptSkipped
+        NotificationHelper.isFullScreenPermissionRequired(this) && !fullScreenPromptSkipped && !fullScreenEverGranted
 
     private val playUpdateResultLauncher = registerForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult()
@@ -106,6 +121,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         playUpdateManager = PlayUpdateManager(this)
         fullScreenPromptSkipped = readFullScreenSkipped()
+        fullScreenEverGranted = readFullScreenEverGranted()
         isFullScreenPermissionRequired = shouldGateFullScreen()
         checkNotificationPermission()
         handleIntent(intent)
@@ -132,6 +148,24 @@ class MainActivity : ComponentActivity() {
                     val blockingUpdate by viewModel.blockingUpdateState.collectAsStateWithLifecycle()
                     val optionalUpdate by viewModel.optionalUpdateState.collectAsStateWithLifecycle()
 
+                    Column(modifier = Modifier.fillMaxSize()) {
+                    if (fullScreenLost && !fullScreenBannerDismissed) {
+                        Surface(color = androidx.compose.ui.graphics.Color(0xFFFFF3E0), modifier = Modifier.fillMaxWidth().statusBarsPadding()) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text(
+                                    "Full-screen order alert is OFF on this phone. New orders still ring, but may not open on a locked screen.",
+                                    fontSize = 12.sp, color = androidx.compose.ui.graphics.Color(0xFFE65100), modifier = Modifier.weight(1f)
+                                )
+                                TextButton(onClick = { openFullScreenPermissionSettings() }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) { Text("Turn on", fontSize = 12.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold) }
+                                TextButton(onClick = { fullScreenBannerDismissed = true }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) { Text("Hide", fontSize = 12.sp) }
+                            }
+                        }
+                    }
+                    Box(modifier = Modifier.weight(1f)) {
                     MainVendorApp(
                         viewModel = viewModel,
                         initialTargetTab = intent.getStringExtra("NAVIGATE_TO"),
@@ -179,6 +213,8 @@ class MainActivity : ComponentActivity() {
                         onDismissAutostartTip = { viewModel.dismissAutostartTip() },
                         onOpenAppInfo = { openAppInfo() }
                     )
+                    }
+                    }
                 }
             }
             }
@@ -251,7 +287,14 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         // Re-check after the vendor returns from the system settings page.
         // Once actually granted, clear the skip so Profile reflects the true state.
-        if (!NotificationHelper.isFullScreenPermissionRequired(this)) setFullScreenSkipped(false)
+        val fullScreenRequired = NotificationHelper.isFullScreenPermissionRequired(this)
+        if (!fullScreenRequired) {
+            // allowed: remember it for good (the skip flag stays as it was, so the blocking screen never returns)
+            if (!fullScreenEverGranted) setFullScreenEverGranted()
+            fullScreenBannerDismissed = false
+        }
+        // switched off again later (by the vendor or by the phone): a quiet reminder, never the blocking screen
+        fullScreenLost = fullScreenRequired && (fullScreenEverGranted || fullScreenPromptSkipped)
         isFullScreenPermissionRequired = shouldGateFullScreen()
         val notifGranted = androidx.core.app.NotificationManagerCompat.from(this).areNotificationsEnabled()
         viewModel.updateNotificationPermissionStatus(notifGranted)
