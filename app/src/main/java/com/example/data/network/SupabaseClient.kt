@@ -190,6 +190,9 @@ class SupabaseClient(private val sessionManager: SessionManager) {
     }
 
     private val okHttpClient = OkHttpClient.Builder()
+        // The default allows only 5 requests at a time per host; the screens ask for several things at once.
+        .dispatcher(okhttp3.Dispatcher().apply { maxRequests = 64; maxRequestsPerHost = 24 })
+        .connectionPool(okhttp3.ConnectionPool(8, 5, TimeUnit.MINUTES))
         .addInterceptor(retryInterceptor)
         .addInterceptor(authInterceptor)
         .authenticator(tokenAuthenticator)

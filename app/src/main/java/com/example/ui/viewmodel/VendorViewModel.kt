@@ -89,6 +89,7 @@ data class DashboardUiState(
     val showBatteryOptimizationWarning: Boolean = false,
     val showAutostartTipDialog: Boolean = false,
     val isLoading: Boolean = false,
+    val hasLoadedOnce: Boolean = false,
     val errorMessage: String? = null
 )
 
@@ -276,6 +277,7 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
             com.example.util.OrderEventBus.incomingOrderEvents.collect { _ ->
                 val vId = currentVendorId()
                 if (vId != null) {
+                    repository.invalidateLiveData()
                     loadOrders(vId)
                     loadDashboard(vId)
                 }
@@ -533,6 +535,23 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
                 return@launch
             }
 
+            // Fast start: a vendor who was approved last time goes straight to the dashboard from the saved profile.
+            // The session and the profile are checked quietly right after (status changes still apply at once).
+            val saved = sessionManager.cachedVendor
+            if (saved != null && saved.isActive && saved.approvalStatus.equals("approved", ignoreCase = true) && !sessionManager.accessToken.isNullOrBlank()) {
+                processVendorStatus(saved)
+                if (sessionManager.isTokenExpiredOrExpiringSoon()) {
+                    val r = repository.validateOrRefreshSession()
+                    if (r is Resource.Error && r.code == 401) { handleSessionExpired("Your session expired, please log in again"); return@launch }
+                }
+                when (val fresh = repository.fetchVendorProfile()) {
+                    is Resource.Success -> processVendorStatus(fresh.data, loadData = false)
+                    is Resource.Error -> if (fresh.code == 401) handleSessionExpired("Your session expired, please log in again")
+                    Resource.Loading -> {}
+                }
+                return@launch
+            }
+
             _authUiState.value = AuthUiState.Loading
 
             // Proactively refresh session if access token is expired or close to expiration
@@ -668,20 +687,30 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
             ?: sessionManager.cachedVendor?.id
     }
 
+    private var lastMenuLoadAt = 0L
+
     fun refreshAll() {
         val vendorId = currentVendorId() ?: return
+        // One fresh start: the loaders below share identical requests (orders, reviews, wallet) instead of repeating them.
+        repository.invalidateLiveData()
+        // What the vendor sees first: today's numbers and the live orders.
         loadDashboard(vendorId)
         loadOrders(vendorId)
-        loadMenu(vendorId, forceRefresh = true)
-        loadEarnings(vendorId)
-        loadReviews(vendorId)
+        // The other tabs a moment later, so they never compete with the first screen.
+        viewModelScope.launch {
+            delay(700)
+            val menuStale = System.currentTimeMillis() - lastMenuLoadAt > 60_000L
+            if (menuStale) { lastMenuLoadAt = System.currentTimeMillis(); loadMenu(vendorId, forceRefresh = true) }
+            loadEarnings(vendorId)
+            loadReviews(vendorId)
+        }
     }
 
     // --- Dashboard & Store Toggle ---
     fun loadDashboard(vendorId: String? = null) {
         viewModelScope.launch {
             val vId = vendorId ?: currentVendorId() ?: return@launch
-            _dashboardState.update { it.copy(isLoading = true, errorMessage = null) }
+            _dashboardState.update { it.copy(isLoading = !it.hasLoadedOnce, errorMessage = null) }
             
             // Rule 4: Run independent requests in parallel, not one after another
             try {
@@ -746,6 +775,7 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
 
                     _dashboardState.update {
                         it.copy(
+                            hasLoadedOnce = true,
                             ordersTodayCount = ordersTodayCount,
                             deliveredOrdersTodayCount = deliveredOrdersTodayCount,
                             earningsTodaySum = todayEarningsVendorAmount?.toDouble() ?: 0.0,
@@ -1193,7 +1223,8 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
             // Keep the pages the vendor already loaded when the list is refreshed by polling.
             val pagesLoaded = (_ordersState.value.page + 1).coerceIn(1, 5)
             val limit = pagesLoaded * 20
-            _ordersState.update { it.copy(isLoading = true, errorMessage = null) }
+            // Silent refresh: the list stays on screen while it updates (no spinner flash every few seconds)
+            _ordersState.update { it.copy(isLoading = it.orders.isEmpty(), errorMessage = null) }
             when (val res = repository.getOrders(vId, limit = limit, offset = 0)) {
                 is Resource.Success -> {
                     _ordersState.update {
@@ -2152,11 +2183,14 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
     private fun startAutoPolling(vendorId: String) {
         livePollingJob?.cancel()
         livePollingJob = viewModelScope.launch {
+            var tick = 0
             while (isActive) {
-                delay(15_000L) // Poll every 15 seconds for live orders while the app is visible
-                if (!ensureThisDeviceIsActive()) break
+                delay(15_000L) // Live orders every 15 seconds while the app is visible
+                tick++
+                // Heavier checks only once a minute (they used to run every 15 s and queued behind the orders)
+                if (tick % 4 == 0 && !ensureThisDeviceIsActive()) break
                 loadOrders(vendorId)
-                loadDashboard(vendorId)
+                if (tick % 4 == 0) loadDashboard(vendorId)
             }
         }
     }

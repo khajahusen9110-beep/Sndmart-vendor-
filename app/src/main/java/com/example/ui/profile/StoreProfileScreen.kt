@@ -650,6 +650,20 @@ fun StoreProfileScreen(
                             )
                         }
 
+                        // Soft vibration when a button is tapped (like Swiggy); the vendor can switch it off
+                        var tapHaptic by remember { mutableStateOf(com.example.util.AppFeedback.tapEnabled) }
+                        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Tap vibration", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                                Text("A soft vibration when you tap a button", fontSize = 12.sp, color = Slate500)
+                            }
+                            Switch(
+                                checked = tapHaptic,
+                                onCheckedChange = { tapHaptic = it; com.example.util.AppFeedback.setTapEnabled(it) },
+                                colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = SprucePrimary)
+                            )
+                        }
+
                         OutlinedButton(
                             onClick = onTestSoundAlert,
                             modifier = Modifier.fillMaxWidth(),

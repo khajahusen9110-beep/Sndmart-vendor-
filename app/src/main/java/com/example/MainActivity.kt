@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.model.Vendor
+import com.example.util.globalTapFeedback
 import com.example.service.OrderAlarmService
 import com.example.ui.auth.DeactivatedScreen
 import com.example.ui.auth.LoginScreen
@@ -100,6 +101,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        com.example.util.AppFeedback.init(this)
         enableEdgeToEdge()
         playUpdateManager = PlayUpdateManager(this)
         fullScreenPromptSkipped = readFullScreenSkipped()
@@ -386,7 +388,7 @@ fun MainVendorApp(
     var showingProfileScreen by remember { mutableStateOf(false) }
     var showingRegisterScreen by remember { mutableStateOf(false) }
 
-    Box(modifier = modifier.fillMaxSize()) {
+    Box(modifier = modifier.fillMaxSize().globalTapFeedback()) {
         when (val state = authState) {
             is AuthUiState.Loading -> {
                 Box(

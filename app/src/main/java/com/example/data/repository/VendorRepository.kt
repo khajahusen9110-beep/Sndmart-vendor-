@@ -4,6 +4,7 @@ import com.example.data.local.SessionManager
 import com.example.data.model.*
 import com.example.data.network.SupabaseClient
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -29,6 +30,39 @@ class VendorRepository(
     val sessionManager: SessionManager
 ) {
     private val api = supabaseClient.api
+
+    // ---- one request instead of many -----------------------------------------------------------------------------
+    // The dashboard, orders, earnings and reviews screens all start together and ask for the same orders, reviews and
+    // wallet. Identical requests now share one call while it is running and for a few seconds after. Errors are never
+    // kept, and any change (order status, pull to refresh, a new-order push) clears everything first.
+    private val coalesceScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.IO)
+    private val coalesced = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, kotlinx.coroutines.Deferred<Any?>>>()
+
+    fun invalidateLiveData() { coalesced.clear() }
+
+    @Suppress("UNCHECKED_CAST")
+    private suspend fun <T> coalesce(key: String, ttlMs: Long = 4_000L, block: suspend () -> T): T {
+        val now = android.os.SystemClock.elapsedRealtime()
+        val hit = coalesced[key]
+        val deferred: kotlinx.coroutines.Deferred<Any?> =
+            if (hit != null && (!hit.second.isCompleted || now - hit.first < ttlMs)) {
+                hit.second
+            } else {
+                val fresh: kotlinx.coroutines.Deferred<Any?> = coalesceScope.async { block() as Any? }
+                coalesced[key] = now to fresh
+                fresh
+            }
+        val result = try {
+            deferred.await() as T
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            coalesced.remove(key)
+            throw e
+        }
+        if (result is Resource.Error) coalesced.remove(key)
+        return result
+    }
 
     suspend fun getAuthenticatedUser(): Resource<AuthUser> = withContext(Dispatchers.IO) {
         try {
@@ -555,7 +589,10 @@ class VendorRepository(
     }
 
     // Orders (Rule 1: Paginated 20 at a time)
-    suspend fun getOrders(vendorId: String, limit: Int = 20, offset: Int = 0): Resource<List<Order>> = withContext(Dispatchers.IO) {
+    suspend fun getOrders(vendorId: String, limit: Int = 20, offset: Int = 0): Resource<List<Order>> =
+        coalesce("orders:$vendorId:$limit:$offset") { fetchOrders(vendorId, limit, offset) }
+
+    private suspend fun fetchOrders(vendorId: String, limit: Int, offset: Int): Resource<List<Order>> = withContext(Dispatchers.IO) {
         try {
             var response = api.getOrders(
                 vendorIdFilter = "eq.$vendorId",
@@ -642,6 +679,7 @@ class VendorRepository(
         newStatus: String,
         expectedCurrentStatus: String
     ): Resource<Order> = withContext(Dispatchers.IO) {
+        invalidateLiveData() // the lists change as soon as the status does
         try {
             val response = api.updateOrderStatus(
                 orderIdFilter = "eq.$orderId",
@@ -674,7 +712,9 @@ class VendorRepository(
     }
 
     // Earnings & Wallet
-    suspend fun getVendorWallet(): Resource<VendorWalletResponse> = withContext(Dispatchers.IO) {
+    suspend fun getVendorWallet(): Resource<VendorWalletResponse> = coalesce("wallet") { fetchVendorWallet() }
+
+    private suspend fun fetchVendorWallet(): Resource<VendorWalletResponse> = withContext(Dispatchers.IO) {
         try {
             val response = api.getMyVendorWallet()
             if (response.isSuccessful) {
@@ -734,6 +774,12 @@ class VendorRepository(
 
     // Orders placed today filtered on server using IST range converted to UTC
     suspend fun getTodayOrders(
+        vendorId: String,
+        startUtcIso: String,
+        endUtcIso: String
+    ): Resource<List<Order>> = coalesce("today:$vendorId:$startUtcIso") { fetchTodayOrders(vendorId, startUtcIso, endUtcIso) }
+
+    private suspend fun fetchTodayOrders(
         vendorId: String,
         startUtcIso: String,
         endUtcIso: String
@@ -817,7 +863,10 @@ class VendorRepository(
     }
 
     // Reviews (Rule 1: Paginated 20 at a time)
-    suspend fun getReviews(vendorId: String, limit: Int = 20, offset: Int = 0): Resource<List<Review>> = withContext(Dispatchers.IO) {
+    suspend fun getReviews(vendorId: String, limit: Int = 20, offset: Int = 0): Resource<List<Review>> =
+        coalesce("reviews:$vendorId:$limit:$offset") { fetchReviews(vendorId, limit, offset) }
+
+    private suspend fun fetchReviews(vendorId: String, limit: Int, offset: Int): Resource<List<Review>> = withContext(Dispatchers.IO) {
         try {
             var response = api.getReviews(vendorIdFilter = "eq.$vendorId", limit = limit, offset = offset)
             if (!response.isSuccessful && response.code() == 400) {
