@@ -45,6 +45,8 @@ fun DashboardScreen(
     onRequestIgnoreBatteryOptimization: () -> Unit = {},
     onDismissAutostartTip: () -> Unit = {},
     onOpenAppInfo: () -> Unit = {},
+    quotesWaiting: Int = 0,
+    onOpenQuotes: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     LazyColumn(
@@ -54,6 +56,20 @@ fun DashboardScreen(
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        // Shops: price requests from customers (custom work)
+        if (onOpenQuotes != null) item {
+            Surface(onClick = onOpenQuotes, shape = RoundedCornerShape(16.dp), color = if (quotesWaiting > 0) androidx.compose.ui.graphics.Color(0xFFFEF3C7) else androidx.compose.ui.graphics.Color.White, border = BorderStroke(1.dp, if (quotesWaiting > 0) androidx.compose.ui.graphics.Color(0xFFF59E0B) else androidx.compose.ui.graphics.Color(0xFFE2E8F0)), modifier = Modifier.fillMaxWidth()) {
+                Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Price requests", fontWeight = FontWeight.ExtraBold, fontSize = 16.sp)
+                        Text(if (quotesWaiting > 0) "$quotesWaiting customer${if (quotesWaiting > 1) "s are" else " is"} waiting for your price" else "Customers ask for a price on custom work", fontSize = 12.sp, color = androidx.compose.ui.graphics.Color(0xFF64748B))
+                    }
+                    if (quotesWaiting > 0) Surface(shape = androidx.compose.foundation.shape.CircleShape, color = androidx.compose.ui.graphics.Color(0xFFDC2626)) {
+                        Text("$quotesWaiting", color = androidx.compose.ui.graphics.Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 9.dp, vertical = 3.dp))
+                    }
+                }
+            }
+        }
         if (!state.errorMessage.isNullOrBlank()) {
             item {
                 Surface(

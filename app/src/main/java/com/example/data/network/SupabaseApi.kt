@@ -140,7 +140,7 @@ interface SupabaseApi {
     @GET("rest/v1/products")
     suspend fun getProducts(
         @Query("vendor_id") vendorIdFilter: String,
-        @Query("select") select: String = "id,vendor_id,category_id,name,description,price,unit,image_url,is_active,stock_qty,is_available,available_from,available_until,created_at,is_customizable,custom_allow_note,custom_allow_photo,custom_note_label,custom_required,custom_lead_hours,custom_extra_charge,min_order_qty,mrp",
+        @Query("select") select: String = "id,vendor_id,category_id,name,description,price,unit,image_url,is_active,stock_qty,is_available,available_from,available_until,created_at,is_customizable,custom_allow_note,custom_allow_photo,custom_note_label,custom_required,custom_lead_hours,custom_extra_charge,min_order_qty,mrp,needs_quote",
         @Query("order") order: String = "created_at.desc",
         @Query("limit") limit: Int? = 30,
         @Query("offset") offset: Int? = 0
@@ -225,6 +225,16 @@ interface SupabaseApi {
         @Query("select") select: String = "status,created_at",
         @Query("order") order: String = "created_at.asc"
     ): Response<List<OrderStatusHistory>>
+
+    // Price quotes for custom work
+    @POST("rest/v1/rpc/vendor_quotes_list")
+    suspend fun vendorQuotesList(@Body body: Map<String, @JvmSuppressWildcards Any?>): Response<okhttp3.ResponseBody>
+
+    @POST("rest/v1/rpc/vendor_quote_send")
+    suspend fun vendorQuoteSend(@Body body: Map<String, @JvmSuppressWildcards Any?>): Response<okhttp3.ResponseBody>
+
+    @POST("rest/v1/rpc/vendor_quote_decline")
+    suspend fun vendorQuoteDecline(@Body body: Map<String, @JvmSuppressWildcards Any?>): Response<okhttp3.ResponseBody>
 
     // 7. Wallet Transactions
     @POST("rest/v1/rpc/get_my_vendor_wallet")

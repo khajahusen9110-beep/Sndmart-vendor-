@@ -163,7 +163,9 @@ data class Product(
     @Json(name = "custom_required") val customRequired: Boolean = false,
     @Json(name = "custom_lead_hours") val customLeadHours: Int = 0,
     @Json(name = "custom_extra_charge") val customExtraCharge: Double = 0.0,
-    @Json(name = "min_order_qty") val minOrderQty: Int = 1
+    @Json(name = "min_order_qty") val minOrderQty: Int = 1,
+    // Shops: the price is quoted by the shop for each request (the customer asks first)
+    @Json(name = "needs_quote") val needsQuote: Boolean = false
 ) {
     val effectiveStock: Int get() = stockQty ?: stockQuantity ?: 0
     val isSoldOut: Boolean get() = effectiveStock <= 0
@@ -549,10 +551,12 @@ data class ProductCustomization(
     /** Original price (MRP) for an offer: the app shows the discount. null = no offer */
     val mrp: Double? = null,
     /** Smallest quantity a customer can order */
-    val minOrderQty: Int = 1
+    val minOrderQty: Int = 1,
+    /** The price is quoted by the shop for each request */
+    val needsQuote: Boolean = false
 ) {
     /** Shop rules that apply to every shop product, customisable or not */
-    fun shopMap(): Map<String, Any?> = mapOf("mrp" to mrp, "min_order_qty" to minOrderQty.coerceIn(1, 1000))
+    fun shopMap(): Map<String, Any?> = mapOf("mrp" to mrp, "min_order_qty" to minOrderQty.coerceIn(1, 1000), "needs_quote" to needsQuote)
 
     fun toMap(): Map<String, Any?> = mapOf(
         "is_customizable" to enabled,
@@ -613,4 +617,30 @@ internal fun parseIsoMillis(iso: String?): Long? {
         java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US).apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
             .parse(iso.take(19))?.time
     } catch (_: Exception) { null }
+}
+
+
+/** A customer's request for a price (custom work), read by hand from the server's JSON. */
+data class VendorQuote(
+    val id: String, val customerName: String, val productName: String, val basePrice: Double?, val variantLabel: String?, val quantity: Int,
+    val note: String?, val photoPath: String?, val status: String, val quotedUnitPrice: Double?, val vendorNote: String?,
+    val expiresAt: String?, val validUntil: String?, val createdAt: String?
+) {
+    val statusLabel get() = when (status) {
+        "requested" -> "Needs your price"; "quoted" -> "Price sent"; "accepted" -> "Accepted"; "declined" -> "Declined"
+        "cancelled" -> "Cancelled"; "expired" -> "Expired"; "used" -> "Ordered"; else -> status
+    }
+    companion object {
+        private fun JSONObjectS(o: org.json.JSONObject, k: String): String? = if (o.isNull(k)) null else o.optString(k).takeIf { it.isNotBlank() }
+        private fun JSONObjectD(o: org.json.JSONObject, k: String): Double? = if (o.isNull(k)) null else o.optDouble(k)
+        fun listFrom(raw: String): List<VendorQuote> {
+            val a = org.json.JSONArray(raw)
+            return (0 until a.length()).map { i ->
+                val o = a.getJSONObject(i)
+                VendorQuote(o.getString("id"), o.optString("customer_name", "Customer"), o.optString("product_name"), JSONObjectD(o, "base_price"), JSONObjectS(o, "variant_label"),
+                    o.optDouble("quantity", 1.0).toInt(), JSONObjectS(o, "note"), JSONObjectS(o, "photo_path"), o.optString("status"), JSONObjectD(o, "quoted_unit_price"),
+                    JSONObjectS(o, "vendor_note"), JSONObjectS(o, "expires_at"), JSONObjectS(o, "valid_until"), JSONObjectS(o, "created_at"))
+            }
+        }
+    }
 }

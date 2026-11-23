@@ -455,6 +455,9 @@ private fun MainVendorAppContent(
         }
     }
     var showingProfileScreen by remember { mutableStateOf(false) }
+    var showingQuotesScreen by remember { mutableStateOf(false) }
+    val quotesList by viewModel.quotes.collectAsState()
+    val quotesError by viewModel.quotesError.collectAsState()
     var showingRegisterScreen by remember { mutableStateOf(false) }
     var showingForgotScreen by remember { mutableStateOf(false) }
 
@@ -548,8 +551,20 @@ private fun MainVendorAppContent(
 
         is AuthUiState.Authenticated -> {
             val vendor = state.vendor
+            // shops: keep the count of waiting price requests fresh
+            LaunchedEffect(vendor.id) {
+                if ((vendor.vendorType ?: "hotel") != "hotel") { while (true) { viewModel.refreshQuotes(); kotlinx.coroutines.delay(60_000) } }
+            }
 
-            if (showingProfileScreen) {
+            if (showingQuotesScreen) {
+                com.example.ui.menu.QuotesScreen(
+                    quotes = quotesList, error = quotesError, onRefresh = { viewModel.refreshQuotes() },
+                    onSend = { id, price, note, done -> viewModel.sendQuote(id, price, note, done) },
+                    onDecline = { id, reason, done -> viewModel.declineQuote(id, reason, done) },
+                    loadPhotoUrl = { p -> viewModel.customPhotoUrl(p) },
+                    onBack = { showingQuotesScreen = false }
+                )
+            } else if (showingProfileScreen) {
                 StoreProfileScreen(
                     state = profileState,
                     onSaveProfile = { name, ownerName, phone, address, lat, lng, openTime, closeTime, bannerUrl, cityId, onComplete ->
@@ -663,7 +678,9 @@ private fun MainVendorAppContent(
                                         onFixAlerts = { onFixAlerts(vendor) },
                                         onRequestIgnoreBatteryOptimization = onRequestIgnoreBatteryOptimization,
                                         onDismissAutostartTip = onDismissAutostartTip,
-                                        onOpenAppInfo = onOpenAppInfo
+                                        onOpenAppInfo = onOpenAppInfo,
+                                        quotesWaiting = quotesList.count { it.status == "requested" },
+                                        onOpenQuotes = if ((vendor.vendorType ?: "hotel") != "hotel") ({ showingQuotesScreen = true }) else null
                                     )
                                 }
 

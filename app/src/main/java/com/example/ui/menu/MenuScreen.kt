@@ -1357,6 +1357,7 @@ fun MenuScreen(
         // Made-to-order options (shops only)
         // customised categories (bakery, gifts, frames, printing) start with the made-to-order options on
         var customOn by remember { mutableStateOf(editingProduct?.isCustomizable ?: labels.allowsCustomisation) }
+        var needsQuote by remember { mutableStateOf(editingProduct?.needsQuote ?: false) }
         var customNote by remember { mutableStateOf(editingProduct?.customAllowNote ?: true) }
         var customPhoto by remember { mutableStateOf(editingProduct?.customAllowPhoto ?: false) }
         var customLabel by remember { mutableStateOf(editingProduct?.customNoteLabel ?: "") }
@@ -1390,7 +1391,7 @@ fun MenuScreen(
         val customization = ProductCustomization(
             customOn, customNote, customPhoto, customLabel, customRequired, customLeadStr.toIntOrNull() ?: 0,
             if (isShop && variantsLoaded) variantInputs else null,
-            extraStr.toDoubleOrNull() ?: 0.0, mrpStr.toDoubleOrNull(), minQtyStr.toIntOrNull() ?: 1
+            extraStr.toDoubleOrNull() ?: 0.0, mrpStr.toDoubleOrNull(), minQtyStr.toIntOrNull() ?: 1, needsQuote
         )
         var imageUrl by remember { mutableStateOf(editingProduct?.imageUrl ?: "") }
         var selectedProductPhoto by remember { mutableStateOf<SelectedImageFile?>(null) }
@@ -1631,6 +1632,21 @@ fun MenuScreen(
                                         }
                                     }
                                     if (variantRows.size < 12) OutlinedButton(onClick = { variantRows.add(VariantRow(null, "", "")) }, enabled = variantsLoaded) { Icon(Icons.Default.Add, contentDescription = null); Spacer(Modifier.width(6.dp)); Text("Add size / option") }
+                                }
+                            }
+                        }
+                    }
+
+                    // Price by quote: the customer asks, the shop sends a price for each request (custom work)
+                    if (isShop) {
+                        item {
+                            Surface(shape = RoundedCornerShape(12.dp), color = PolishBackgroundLight, border = BorderStroke(1.dp, PolishBorderLight), modifier = Modifier.fillMaxWidth()) {
+                                Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text("Price by quote", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                        Text("Custom work (tailoring, cake design...): customers ask for a price and you send it for each request. The listed price is only a guide.", fontSize = 11.sp, color = Slate500)
+                                    }
+                                    Switch(checked = needsQuote, onCheckedChange = { needsQuote = it })
                                 }
                             }
                         }

@@ -1158,6 +1158,33 @@ class VendorRepository(
     }
 
     // 13. Cities for Self-Registration (Rule 6: Cached)
+    private fun quoteError(raw: String, code: Int, fallback: String): String =
+        runCatching { org.json.JSONObject(raw).optString("message") }.getOrNull()?.takeIf { it.isNotBlank() } ?: "$fallback (HTTP $code)"
+
+    suspend fun getQuotes(vendorId: String): Result<List<VendorQuote>> = withContext(Dispatchers.IO) {
+        try {
+            val res = api.vendorQuotesList(mapOf("p_vendor_id" to vendorId))
+            val raw = res.body()?.string() ?: res.errorBody()?.string().orEmpty()
+            if (res.isSuccessful) Result.success(VendorQuote.listFrom(raw)) else Result.failure(Exception(quoteError(raw, res.code(), "Could not load the requests")))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    suspend fun sendQuote(quoteId: String, unitPrice: Double, note: String?): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val res = api.vendorQuoteSend(mapOf("p_quote_id" to quoteId, "p_unit_price" to unitPrice, "p_note" to note))
+            val raw = res.body()?.string() ?: res.errorBody()?.string().orEmpty()
+            if (res.isSuccessful) Result.success(Unit) else Result.failure(Exception(quoteError(raw, res.code(), "Could not send the price")))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    suspend fun declineQuote(quoteId: String, reason: String?): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val res = api.vendorQuoteDecline(mapOf("p_quote_id" to quoteId, "p_reason" to reason))
+            val raw = res.body()?.string() ?: res.errorBody()?.string().orEmpty()
+            if (res.isSuccessful) Result.success(Unit) else Result.failure(Exception(quoteError(raw, res.code(), "Could not decline")))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
     /** A short-lived link to the customer's photo for a made-to-order line, or null. */
     suspend fun getCustomPhotoUrl(path: String): String? = withContext(Dispatchers.IO) {
         try {

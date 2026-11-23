@@ -756,6 +756,28 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    // Price quotes for custom work: requests from customers, answered with a price
+    private val _quotes = MutableStateFlow<List<VendorQuote>>(emptyList())
+    val quotes: StateFlow<List<VendorQuote>> = _quotes.asStateFlow()
+    private val _quotesError = MutableStateFlow<String?>(null)
+    val quotesError: StateFlow<String?> = _quotesError.asStateFlow()
+    val quotesWaiting: Int get() = _quotes.value.count { it.status == "requested" }
+
+    fun refreshQuotes() {
+        val vid = currentVendorId() ?: return
+        viewModelScope.launch {
+            repository.getQuotes(vid).onSuccess { _quotes.value = it; _quotesError.value = null }.onFailure { _quotesError.value = it.message }
+        }
+    }
+
+    fun sendQuote(id: String, price: Double, note: String?, onDone: (String?) -> Unit) {
+        viewModelScope.launch { val r = repository.sendQuote(id, price, note); if (r.isSuccess) refreshQuotes(); onDone(r.exceptionOrNull()?.message) }
+    }
+
+    fun declineQuote(id: String, reason: String?, onDone: (String?) -> Unit) {
+        viewModelScope.launch { val r = repository.declineQuote(id, reason); if (r.isSuccess) refreshQuotes(); onDone(r.exceptionOrNull()?.message) }
+    }
+
     private fun currentVendorId(): String? {
         return (_authUiState.value as? AuthUiState.Authenticated)?.vendor?.id
             ?: _profileState.value.vendor?.id
