@@ -465,12 +465,17 @@ fun OrdersScreen(
                                             tint = PolishEmeraldDark,
                                             modifier = Modifier.size(15.dp)
                                         )
-                                        Text(
-                                            text = "Credited to wallet: ${CurrencyFormatter.format(foodSubtotal)}",
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 12.sp,
-                                            color = PolishEmeraldDark
-                                        )
+                                        Column {
+                                            Text(
+                                                text = "Credited to wallet: ${CurrencyFormatter.format(walletCreditFor(order, foodSubtotal))}",
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 12.sp,
+                                                color = PolishEmeraldDark
+                                            )
+                                            commissionNote(order, foodSubtotal)?.let {
+                                                Text(text = it, fontSize = 10.5.sp, color = PolishEmeraldDark.copy(alpha = 0.8f))
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -964,7 +969,8 @@ fun OrdersScreen(
                                         )
                                         Column {
                                             Text(
-                                                text = "Credited to wallet: ${CurrencyFormatter.format(detailFoodSubtotal)}",
+                                                text = "Credited to wallet: ${CurrencyFormatter.format(walletCreditFor(order, detailFoodSubtotal))}" +
+                                                    (commissionNote(order, detailFoodSubtotal)?.let { " ($it)" } ?: ""),
                                                 fontWeight = FontWeight.Bold,
                                                 fontSize = 12.5.sp,
                                                 color = PolishEmeraldDark
@@ -997,7 +1003,7 @@ fun OrdersScreen(
                                             modifier = Modifier.size(16.dp)
                                         )
                                         Text(
-                                            text = "${com.example.ui.LocalVendorLabels.current.earningLabel} ${CurrencyFormatter.format(detailFoodSubtotal)} will be credited to wallet when delivered.",
+                                            text = "${com.example.ui.LocalVendorLabels.current.earningLabel} ${CurrencyFormatter.format(walletCreditFor(order, detailFoodSubtotal))} will be credited to wallet when delivered (after commission).",
                                             fontSize = 11.5.sp,
                                             color = SpruceOnContainer
                                         )
@@ -1211,4 +1217,16 @@ private fun formatStatusTime(isoString: String): String {
     }
 }
 
+/**
+ * What an order puts into the vendor's wallet: the server's own figure (item amount minus commission), or, for an order
+ * without it, the item amount minus the commission. The same for a hotel and for every kind of shop.
+ */
+internal fun walletCreditFor(order: Order, itemAmount: Double): Double =
+    order.vendor_amount?.takeIf { it > 0.0 } ?: (itemAmount - (order.commission_amount ?: 0.0)).coerceAtLeast(0.0)
 
+/** "₹100 − ₹15 commission" under the credited amount, so the vendor sees where the number comes from. */
+internal fun commissionNote(order: Order, itemAmount: Double): String? {
+    val c = order.commission_amount ?: return null
+    if (c <= 0.0) return null
+    return "${CurrencyFormatter.format(itemAmount)} − ${CurrencyFormatter.format(c)} commission"
+}
