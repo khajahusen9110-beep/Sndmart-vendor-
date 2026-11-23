@@ -15,7 +15,7 @@ android {
     minSdk = 24
     targetSdk = 36
     // Play Store requires a higher versionCode for every uploaded release.
-    versionCode = 7
+    versionCode = 8
     versionName = "1.0.6"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
