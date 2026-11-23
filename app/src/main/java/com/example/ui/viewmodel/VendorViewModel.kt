@@ -134,6 +134,7 @@ data class EarningsUiState(
     val walletErrorMessage: String? = null,
     val inProgressWithdrawalsSum: Double = 0.0,
     val availableToWithdraw: Double = 0.0,
+    val withdrawalRules: WithdrawalRules? = null,
     val commissionPercent: Double = 25.0,
     val activeWithdrawalInProgress: Withdrawal? = null,
     val bankDetails: VendorBankDetails? = null,
@@ -1635,6 +1636,7 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
                             walletErrorMessage = if (isWalletError) "Could not update wallet balance from server" else null,
                             inProgressWithdrawalsSum = inProgressSum,
                             availableToWithdraw = available,
+                            withdrawalRules = (walletRes as? Resource.Success)?.data?.rules ?: it.withdrawalRules,
                             commissionPercent = commPercent,
                             activeWithdrawalInProgress = inProgressList.firstOrNull(),
                             page = 0,
@@ -1720,6 +1722,20 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
             _earningsState.update { it.copy(errorMessage = msg) }
             onComplete(false, msg)
             return
+        }
+
+        currentState.withdrawalRules?.let { r ->
+            val rulesMsg = when {
+                !r.canWithdrawToday -> "Withdrawals are accepted on ${r.daysText} only."
+                r.minWithdrawal > 0 && amount < r.minWithdrawal -> "The minimum withdrawal is ${CurrencyFormatter.format(r.minWithdrawal)}."
+                r.maxWithdrawal != null && amount > r.maxWithdrawal -> "You can withdraw at most ${CurrencyFormatter.format(r.maxWithdrawal)} at a time."
+                else -> null
+            }
+            if (rulesMsg != null) {
+                _earningsState.update { it.copy(errorMessage = rulesMsg) }
+                onComplete(false, rulesMsg)
+                return
+            }
         }
 
         if (amountBigDecimal > availableBigDecimal) {

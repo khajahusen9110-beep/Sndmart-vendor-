@@ -42,8 +42,8 @@ import com.example.util.CurrencyFormatter
 import java.math.BigDecimal
 
 enum class EarningsSubTab(val title: String) {
-    WITHDRAWALS("Withdrawals"),
-    TRANSACTIONS("Wallet Log"),
+    WITHDRAWALS("Requests"),
+    TRANSACTIONS("Wallet"),
     PAYOUTS("Payouts")
 }
 
@@ -185,6 +185,14 @@ fun EarningsScreen(
                                 fontWeight = FontWeight.ExtraBold,
                                 color = Color.White
                             )
+                            if (state.runningBalance < 0) {
+                                Text(
+                                    text = "Below zero: money was taken back for an order. New earnings cover it first.",
+                                    fontSize = 11.sp,
+                                    color = Color(0xFFFFD6D6),
+                                    modifier = Modifier.padding(top = 2.dp)
+                                )
+                            }
                             if (state.isWalletBalanceError) {
                                 Spacer(modifier = Modifier.height(3.dp))
                                 Surface(
@@ -353,8 +361,20 @@ fun EarningsScreen(
                             )
                         }
                     } else {
+                        // why the button is off (if it is), in plain words
+                        val rules = state.withdrawalRules
+                        val blockReason = when {
+                            state.availableToWithdraw <= 0.0 -> if (state.runningBalance < 0) "Your wallet balance is below zero. New earnings will cover it first." else "No balance to withdraw yet."
+                            rules != null && !rules.canWithdrawToday -> "Withdrawals are accepted on ${rules.daysText} only."
+                            rules != null && rules.minWithdrawal > 0 && state.availableToWithdraw < rules.minWithdrawal -> "You can withdraw from ${CurrencyFormatter.format(rules.minWithdrawal)}."
+                            else -> null
+                        }
+                        rules?.summary { CurrencyFormatter.format(it) }?.takeIf { it.isNotBlank() }?.let { line ->
+                            Text(line, fontSize = 11.5.sp, color = Slate500, modifier = Modifier.padding(bottom = 6.dp))
+                        }
                         Button(
                             onClick = { showWithdrawalDialog = true },
+                            enabled = blockReason == null,
                             shape = RoundedCornerShape(14.dp),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = SpruceContainerLight,
@@ -562,8 +582,8 @@ fun EarningsScreen(
                             }
                             val defaultDesc = when (kind) {
                                 WalletTransactionKind.CREDIT -> "Order Earning"
-                                WalletTransactionKind.DEBIT -> if (tx.type.equals("withdrawal", ignoreCase = true)) "Withdrawal Payout" else if (tx.type.equals("penalty", ignoreCase = true)) "Penalty Deduction" else "Debit Transaction"
-                                WalletTransactionKind.NEUTRAL -> tx.type.replace('_', ' ').replaceFirstChar { it.uppercase() }
+                                WalletTransactionKind.DEBIT -> if (tx.type.equals("withdrawal", ignoreCase = true)) "Withdrawal Payout" else if (tx.type.equals("penalty", ignoreCase = true)) "Penalty Deduction" else if (tx.type.equals("adjustment", ignoreCase = true)) "Adjustment by admin" else "Debit Transaction"
+                                WalletTransactionKind.NEUTRAL -> if (tx.type.equals("adjustment", ignoreCase = true)) "Adjustment by admin" else tx.type.replace('_', ' ').replaceFirstChar { it.uppercase() }
                             }
 
                             Surface(
@@ -1168,6 +1188,9 @@ fun EarningsScreen(
                                 )
                             }
                         }
+                        state.withdrawalRules?.summary { CurrencyFormatter.format(it) }?.takeIf { it.isNotBlank() }?.let { line ->
+                            Text("Rules: $line", fontSize = 12.sp, color = Slate600)
+                        }
 
                         // 2. Server Error Message Banner (Shows exact Postgres error directly)
                         if (!errorMsg.isNullOrBlank()) {
@@ -1308,7 +1331,8 @@ fun EarningsScreen(
                                 showConfirmSubmit = true
                             },
                             enabled = !state.isSubmittingWithdrawal && !isSubmittingLocally && !needsPayoutAccount &&
-                                parsedAmount != null && parsedAmount > 0 && parsedAmount <= available,
+                                parsedAmount != null && parsedAmount > 0 && parsedAmount <= available &&
+                                (state.withdrawalRules?.let { r -> r.canWithdrawToday && parsedAmount >= r.minWithdrawal && (r.maxWithdrawal == null || parsedAmount <= r.maxWithdrawal) } ?: true),
                             shape = RoundedCornerShape(12.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = SprucePrimary)
                         ) {

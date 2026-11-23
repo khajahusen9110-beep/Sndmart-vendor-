@@ -332,13 +332,9 @@ fun OrdersScreen(
                     val isConfirmed = order.status?.lowercase() == "confirmed"
                     val isPreparing = order.status?.lowercase() == "preparing"
 
-                    Surface(
-                        onClick = { onSelectOrder(order) },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(20.dp),
-                        color = if (isConfirmed) PolishAmberLight else PolishSurfaceLight,
-                        border = if (isConfirmed) BorderStroke(2.dp, PolishAmber) else BorderStroke(1.dp, PolishBorderLight),
-                        shadowElevation = if (isConfirmed) 4.dp else 0.dp
+                    OrderCardSurface(
+                        status = order.status,
+                        onClick = { onSelectOrder(order) }
                     ) {
                         Column(
                             modifier = Modifier
@@ -608,19 +604,26 @@ fun OrdersScreen(
                                         }
                                     }
                                     "delivered" -> {
-                                        Text(
-                                            text = "✓ Order completed & delivered",
-                                            fontSize = 12.sp,
-                                            color = PolishEmeraldDark,
-                                            fontWeight = FontWeight.SemiBold
-                                        )
+                                        Surface(color = PolishEmeraldLight, shape = RoundedCornerShape(50), border = BorderStroke(1.dp, PolishEmerald.copy(alpha = 0.5f))) {
+                                            Text(
+                                                text = "✓ Order completed & delivered",
+                                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
+                                                fontSize = 12.sp,
+                                                color = PolishEmeraldDark,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
                                     }
                                     "cancelled" -> {
-                                        Text(
-                                            text = "✕ Order cancelled",
-                                            fontSize = 12.sp,
-                                            color = PolishRose
-                                        )
+                                        Surface(color = PolishRoseLight, shape = RoundedCornerShape(50), border = BorderStroke(1.dp, PolishRose.copy(alpha = 0.5f))) {
+                                            Text(
+                                                text = "✕ Order cancelled",
+                                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
+                                                fontSize = 12.sp,
+                                                color = PolishRoseDark,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
                                     }
                                 }
                             }

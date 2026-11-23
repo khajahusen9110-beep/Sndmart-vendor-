@@ -335,8 +335,25 @@ data class WalletTransaction(
 data class VendorWalletResponse(
     @Json(name = "vendor_id") val vendorId: String? = null,
     val balance: Double = 0.0,
+    val rules: WithdrawalRules? = null,
     val transactions: List<WalletTransaction>? = null
 )
+
+/** The city's withdrawal rules (set by the City Admin); the server enforces them, the app only explains them. */
+@JsonClass(generateAdapter = true)
+data class WithdrawalRules(
+    @Json(name = "min_withdrawal") val minWithdrawal: Double = 0.0,
+    @Json(name = "max_withdrawal") val maxWithdrawal: Double? = null,
+    @Json(name = "days_text") val daysText: String = "Any day",
+    @Json(name = "can_withdraw_today") val canWithdrawToday: Boolean = true
+) {
+    /** One line for the vendor, e.g. "Minimum ₹500 · Mon, Thu · up to ₹10,000 at a time". Empty when there are no rules. */
+    fun summary(format: (Double) -> String): String = listOfNotNull(
+        minWithdrawal.takeIf { it > 0 }?.let { "Minimum ${format(it)}" },
+        daysText.takeIf { it != "Any day" },
+        maxWithdrawal?.let { "up to ${format(it)} at a time" }
+    ).joinToString(" · ")
+}
 
 @JsonClass(generateAdapter = true)
 data class Payout(
