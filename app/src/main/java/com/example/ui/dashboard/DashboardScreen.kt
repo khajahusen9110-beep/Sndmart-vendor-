@@ -146,130 +146,72 @@ fun DashboardScreen(
             }
         }
 
-        // 1.5. Order Alerts Status & Test Alert Card (Requirement A7 & A8)
+        // 1.5. New orders: what needs the vendor's attention right now (the same for a hotel and for every kind of shop)
         item {
-            Surface(
-                shape = RoundedCornerShape(20.dp),
-                color = if (state.isOrderAlertsOn) PolishEmeraldLight.copy(alpha = 0.5f) else PolishRoseLight.copy(alpha = 0.6f),
-                border = BorderStroke(
-                    1.dp,
-                    if (state.isOrderAlertsOn) PolishEmeraldDark.copy(alpha = 0.25f) else PolishRose.copy(alpha = 0.35f)
-                ),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(38.dp)
-                                    .clip(CircleShape)
-                                    .background(if (state.isOrderAlertsOn) PolishEmerald else PolishRose),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = if (state.isOrderAlertsOn) Icons.Default.NotificationsActive else Icons.Default.NotificationsOff,
-                                    contentDescription = null,
-                                    tint = Color.White,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                            Column {
-                                Text(
-                                    text = if (state.isOrderAlertsOn) "Order alerts: ON" else "Order alerts: OFF",
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (state.isOrderAlertsOn) PolishEmeraldDark else PolishRoseDark
-                                )
-                                Text(
-                                    text = if (state.isOrderAlertsOn) {
-                                        "1-minute alarm active for new orders"
-                                    } else {
-                                        state.orderAlertsOffReason ?: "Push notifications disabled"
-                                    },
-                                    fontSize = 12.sp,
-                                    color = Slate600
-                                )
-                            }
+            val labels = com.example.ui.LocalVendorLabels.current
+            var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+            LaunchedEffect(Unit) { while (true) { kotlinx.coroutines.delay(30_000); now = System.currentTimeMillis() } }
+            val newOrders = state.recentOrders.filter { it.status?.trim()?.lowercase() == "confirmed" }
+            val count = maxOf(state.confirmedOrdersCount, newOrders.size)
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("New Orders", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Slate900)
+                        if (count > 0) Surface(color = PolishAmberDark, shape = RoundedCornerShape(50)) {
+                            Text("$count", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(horizontal = 9.dp, vertical = 2.dp))
                         }
-
-                        if (!state.isOrderAlertsOn) {
-                            Button(
-                                onClick = onFixAlerts,
-                                shape = RoundedCornerShape(12.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = PolishRoseDark,
-                                    contentColor = Color.White
-                                ),
-                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
-                            ) {
-                                Text("Fix", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                    TextButton(onClick = { onNavigateToOrders("CONFIRMED") }) {
+                        Text("VIEW ALL", color = SprucePrimary, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    }
+                }
+                if (state.isLoading && state.recentOrders.isEmpty()) {
+                    OrderCardSkeleton()
+                } else if (newOrders.isEmpty()) {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp),
+                        color = PolishEmeraldLight.copy(alpha = 0.45f), border = BorderStroke(1.dp, PolishEmerald.copy(alpha = 0.3f))
+                    ) {
+                        Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Icon(Icons.Default.CheckCircle, contentDescription = null, tint = PolishEmerald, modifier = Modifier.size(28.dp))
+                            Column {
+                                Text("No new orders right now", fontWeight = FontWeight.Bold, color = PolishEmeraldDark)
+                                Text(if (state.isStoreOpen) "New orders appear here the moment they arrive." else "Your store is closed, so customers cannot order.", fontSize = 12.sp, color = Slate600)
                             }
                         }
                     }
-
-                    // Battery optimization prompt (Requirement A8)
-                    if (state.showBatteryOptimizationWarning) {
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = PolishAmberLight.copy(alpha = 0.7f),
-                            border = BorderStroke(1.dp, PolishAmberDark.copy(alpha = 0.3f)),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(12.dp),
-                                verticalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.BatteryAlert,
-                                        contentDescription = null,
-                                        tint = PolishAmberDark,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                    Text(
-                                        text = "Allow background alerts",
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 13.sp,
-                                        color = PolishAmberDark
-                                    )
+                } else {
+                    newOrders.take(5).forEach { order ->
+                        com.example.ui.orders.OrderCardSurface(status = order.status, onClick = { onOrderClick(order) }) {
+                            Column(Modifier.fillMaxWidth().padding(start = 18.dp, end = 14.dp, top = 14.dp, bottom = 14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Text("#${order.orderNumber ?: order.id.take(6).uppercase()}", fontWeight = FontWeight.Bold, color = Slate900)
+                                        Surface(color = PolishAmberDark, shape = RoundedCornerShape(6.dp)) {
+                                            Text("NEW", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                                        }
+                                    }
+                                    val age = com.example.util.OrderAge.label(com.example.util.OrderAge.minutesSince(order.createdAt, now))
+                                    if (age.isNotEmpty()) Text(age, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = PolishAmberDark)
                                 }
                                 Text(
-                                    text = "To ensure the new order alarm rings when the screen is locked or app is closed, battery optimization must be turned off.",
-                                    fontSize = 11.5.sp,
-                                    color = Slate700,
-                                    lineHeight = 15.sp
+                                    order.customer?.full_name?.takeIf { it.isNotBlank() } ?: order.customer?.fullName?.takeIf { it.isNotBlank() } ?: order.customerName ?: "Guest Customer",
+                                    fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = Slate900
                                 )
-                                Button(
-                                    onClick = onRequestIgnoreBatteryOptimization,
-                                    shape = RoundedCornerShape(8.dp),
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = PolishAmberDark,
-                                        contentColor = Color.White
-                                    ),
-                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                                    modifier = Modifier.align(Alignment.End)
-                                ) {
-                                    Text("Turn off optimization", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                                val names = order.orderItems.orEmpty().joinToString(", ") { "${(it.quantity ?: 1.0).toInt()}x ${it.productName}" }
+                                if (names.isNotBlank()) Text(names, fontSize = 12.sp, color = Slate600, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                com.example.ui.orders.scheduledWindowLabel(order.scheduled_for, order.scheduled_until)?.let { w ->
+                                    Text("⏰ Scheduled: $w", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = PolishAmberDark)
+                                }
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                    Text("${order.orderItems?.size ?: 1} ${if (labels.isHotel) "items" else "products"} • ${CurrencyFormatter.format(order.totalAmount)}", fontSize = 12.sp, color = Slate500)
+                                    Text("OPEN ORDER ›", fontSize = 11.5.sp, fontWeight = FontWeight.ExtraBold, color = SprucePrimary)
                                 }
                             }
                         }
+                    }
+                    if (count > newOrders.size) {
+                        TextButton(onClick = { onNavigateToOrders("CONFIRMED") }) { Text("See all $count new orders", fontWeight = FontWeight.Bold, color = SprucePrimary) }
                     }
                 }
             }
@@ -496,7 +438,7 @@ fun DashboardScreen(
                 }
             }
         } else {
-            items(state.recentOrders.take(6), key = { it.id }) { order ->
+            items(state.recentOrders.filter { it.status?.trim()?.lowercase() != "confirmed" }.take(6), key = { it.id }) { order ->
                 Surface(
                     onClick = { onOrderClick(order) },
                     modifier = Modifier.fillMaxWidth(),

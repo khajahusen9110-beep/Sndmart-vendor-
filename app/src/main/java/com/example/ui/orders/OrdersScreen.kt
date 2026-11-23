@@ -1188,7 +1188,7 @@ private fun OrderDayHeader(day: String) {
 }
 
 /** "Today 4 PM - 6 PM" / "23 Nov 4 PM - 6 PM" for a scheduled shop order, or null for a normal order. */
-private fun scheduledWindowLabel(fromIso: String?, untilIso: String?): String? {
+internal fun scheduledWindowLabel(fromIso: String?, untilIso: String?): String? {
     if (fromIso.isNullOrBlank()) return null
     return try {
         val utc = java.util.TimeZone.getTimeZone("UTC")
