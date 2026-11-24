@@ -25,9 +25,11 @@ object ImageCompressor {
     private val QUALITY_FLOORS = listOf(60, 50, 40, 32, 25, 18)
 
     /** The search itself, apart from Android (so it can be tested): [encode] returns the encoded size for a side and a quality. */
-    internal fun choose(maxSide: Int, target: Int, encode: (side: Int, quality: Int) -> Int): Pair<Int, Int> {
-        // start from the picture's own size (at most 1024 px), then step down
-        val top = minOf(maxSide, 1024).coerceAtLeast(64)
+    internal fun choose(maxSide: Int, target: Int, encode: (side: Int, quality: Int) -> Int): Pair<Int, Int> = chooseCapped(maxSide, target, 1024, encode)
+
+    internal fun chooseCapped(maxSide: Int, target: Int, cap: Int, encode: (side: Int, quality: Int) -> Int): Pair<Int, Int> {
+        // start from the picture's own size (at most [cap] px), then step down
+        val top = minOf(maxSide, cap).coerceAtLeast(64)
         val sides = listOf(top) + SIDES.filter { it < top }
         for (floor in QUALITY_FLOORS) {
             for (side in sides) {
@@ -60,7 +62,10 @@ object ImageCompressor {
     }
 
     /** Returns null when the bytes are not a readable image. */
-    fun compress(original: ByteArray, target: Int = TARGET_BYTES): Result? {
+    /** Identity documents (Aadhaar, food licence): kept readable, about 350 KB at most, not 2 to 6 MB straight from the camera. */
+    fun compressDocument(original: ByteArray): Result? = compress(original, 350 * 1024, 1600)
+
+    fun compress(original: ByteArray, target: Int = TARGET_BYTES, cap: Int = 1024): Result? {
         if (!looksLikeImage(original)) return null
         try {
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -68,7 +73,7 @@ object ImageCompressor {
             if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
             // decode small: the biggest picture we ever keep is 1024 px, so a huge photo is read at a fraction of its size
             var sample = 1
-            while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= 1024) sample *= 2
+            while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= cap) sample *= 2
             val decoded = BitmapFactory.decodeByteArray(original, 0, original.size, BitmapFactory.Options().apply { inSampleSize = sample }) ?: return null
 
             val orientation = try {
@@ -91,7 +96,7 @@ object ImageCompressor {
                 val bmp = bitmaps.getOrPut(side) { scaled(side) }
                 ByteArrayOutputStream().also { bmp.compress(Bitmap.CompressFormat.JPEG, quality, it) }.toByteArray()
             }
-            val (side, quality) = choose(maxOf(upright.width, upright.height), target) { s, q -> encode(s, q).size }
+            val (side, quality) = chooseCapped(maxOf(upright.width, upright.height), target, cap) { s, q -> encode(s, q).size }
             val out = encode(side, quality)
             val bmp = bitmaps.getOrPut(side) { scaled(side) }
             return Result(out, bmp.width, bmp.height, original.size)

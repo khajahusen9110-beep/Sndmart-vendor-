@@ -203,6 +203,28 @@ class SupabaseClient(private val sessionManager: SessionManager) {
         .writeTimeout(30, TimeUnit.SECONDS)
         .build()
 
+    /**
+     * Photo and document uploads use their own connection: plain HTTP/1.1, a fresh connection every time (a connection that went
+     * stale on a weak mobile network is what made uploads wait the full 30 seconds and end in "timeout"), shorter waits per try
+     * so a stuck try is replaced quickly by a new one (the caller retries).
+     */
+    private val storageClient: OkHttpClient = okHttpClient.newBuilder()
+        .protocols(listOf(okhttp3.Protocol.HTTP_1_1))
+        .connectionPool(okhttp3.ConnectionPool(0, 1, TimeUnit.SECONDS))
+        .retryOnConnectionFailure(true)
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .writeTimeout(40, TimeUnit.SECONDS)
+        .readTimeout(40, TimeUnit.SECONDS)
+        .callTimeout(75, TimeUnit.SECONDS)
+        .build()
+
+    val storageApi: SupabaseApi = Retrofit.Builder()
+        .baseUrl(resolveBaseUrl())
+        .client(storageClient)
+        .addConverterFactory(MoshiConverterFactory.create(moshi))
+        .build()
+        .create(SupabaseApi::class.java)
+
     val api: SupabaseApi = Retrofit.Builder()
         .baseUrl(resolveBaseUrl())
         .client(okHttpClient)
