@@ -274,6 +274,7 @@ class MainActivity : ComponentActivity() {
         try {
             // Stop the order alarm whenever the user opens the app from a notification
             OrderAlarmService.stopAlarm(this)
+            if (intent?.getStringExtra("NAVIGATE_TO").equals("quotes", ignoreCase = true)) viewModel.requestOpenQuotes()
             val selectedOrderId = intent?.getStringExtra("SELECTED_ORDER_ID")
             if (!selectedOrderId.isNullOrBlank()) {
                 viewModel.navigateToOrders(selectedOrderId)
@@ -455,8 +456,10 @@ private fun MainVendorAppContent(
         }
     }
     var showingProfileScreen by remember { mutableStateOf(false) }
-    var showingQuotesScreen by remember { mutableStateOf(false) }
+    var showingQuotesScreen by remember { mutableStateOf(initialTargetTab.equals("quotes", ignoreCase = true)) }
     val quotesList by viewModel.quotes.collectAsState()
+    val openQuotesCount by viewModel.openQuotesRequest.collectAsState()
+    LaunchedEffect(openQuotesCount) { if (openQuotesCount > 0) showingQuotesScreen = true }
     val quotesError by viewModel.quotesError.collectAsState()
     var showingRegisterScreen by remember { mutableStateOf(false) }
     var showingForgotScreen by remember { mutableStateOf(false) }

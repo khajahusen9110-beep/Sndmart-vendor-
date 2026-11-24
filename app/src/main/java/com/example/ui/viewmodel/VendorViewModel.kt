@@ -276,6 +276,11 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
     private var livePollingJob: Job? = null
     private var isAppInForeground = false
 
+    /** A quote push tapped while the app is already open: show the Price requests screen. */
+    private val _openQuotesRequest = MutableStateFlow(0)
+    val openQuotesRequest: StateFlow<Int> = _openQuotesRequest.asStateFlow()
+    fun requestOpenQuotes() { _openQuotesRequest.value += 1 }
+
     fun navigateToOrders(orderId: String? = null) {
         setOrdersFilter("CONFIRMED")
         _targetNavigation.value = orderId ?: "orders"
