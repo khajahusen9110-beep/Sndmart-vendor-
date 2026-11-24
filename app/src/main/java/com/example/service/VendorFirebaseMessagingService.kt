@@ -81,7 +81,9 @@ class VendorFirebaseMessagingService : FirebaseMessagingService() {
             }
         } else {
             // Order cancelled/rejected/ready, withdrawals, broadcasts: normal notification.
-            NotificationHelper.showGeneralNotification(this, orderId.hashCode(), title, body, imageUrl = data["image_url"])
+            // a price request / quote update opens the Price requests screen, everything else the Orders tab
+            val tab = if (data["type"].orEmpty().startsWith("store_quote")) "quotes" else "orders"
+            NotificationHelper.showGeneralNotification(this, (data["quote_id"] ?: orderId).hashCode(), title, body, targetTab = tab, imageUrl = data["image_url"])
         }
     }
 

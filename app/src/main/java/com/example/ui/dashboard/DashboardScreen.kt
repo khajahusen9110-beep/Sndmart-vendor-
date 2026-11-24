@@ -49,6 +49,8 @@ fun DashboardScreen(
     onOpenQuotes: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
+    val remoteCfg by com.example.remote.RemoteConfigStore.config.collectAsState()
+    val hasRemote = remoteCfg.blocks.any { it.slot == "home" }
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
@@ -56,6 +58,9 @@ fun DashboardScreen(
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        // Announcements from the City Admin (no app update needed)
+        if (hasRemote) item { com.example.remote.RemoteBlocksStrip("home", onScreen = { com.example.remote.RemoteActions.open(it) }, modifier = Modifier.offset(x = (-16).dp)) }
+
         // Shops: price requests from customers (custom work)
         if (onOpenQuotes != null) item {
             Surface(onClick = onOpenQuotes, shape = RoundedCornerShape(16.dp), color = if (quotesWaiting > 0) androidx.compose.ui.graphics.Color(0xFFFEF3C7) else androidx.compose.ui.graphics.Color.White, border = BorderStroke(1.dp, if (quotesWaiting > 0) androidx.compose.ui.graphics.Color(0xFFF59E0B) else androidx.compose.ui.graphics.Color(0xFFE2E8F0)), modifier = Modifier.fillMaxWidth()) {

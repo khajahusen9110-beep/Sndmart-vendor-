@@ -276,6 +276,11 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
     private var livePollingJob: Job? = null
     private var isAppInForeground = false
 
+    /** A quote push tapped while the app is already open: show the Price requests screen. */
+    private val _openQuotesRequest = MutableStateFlow(0)
+    val openQuotesRequest: StateFlow<Int> = _openQuotesRequest.asStateFlow()
+    fun requestOpenQuotes() { _openQuotesRequest.value += 1 }
+
     fun navigateToOrders(orderId: String? = null) {
         setOrdersFilter("CONFIRMED")
         _targetNavigation.value = orderId ?: "orders"
@@ -776,6 +781,11 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
 
     fun declineQuote(id: String, reason: String?, onDone: (String?) -> Unit) {
         viewModelScope.launch { val r = repository.declineQuote(id, reason); if (r.isSuccess) refreshQuotes(); onDone(r.exceptionOrNull()?.message) }
+    }
+
+    /** Refreshes the remote control data (banners, flags) for this vendor's city. */
+    suspend fun refreshRemoteConfig(context: android.content.Context, cityId: String?) {
+        com.example.remote.RemoteConfigStore.refresh(context, minGapMs = 30 * 60_000L) { repository.getRemoteConfigRaw(cityId, com.example.BuildConfig.VERSION_CODE) }
     }
 
     private fun currentVendorId(): String? {

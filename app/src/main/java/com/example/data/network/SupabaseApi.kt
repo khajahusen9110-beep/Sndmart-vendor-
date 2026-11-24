@@ -226,6 +226,10 @@ interface SupabaseApi {
         @Query("order") order: String = "created_at.asc"
     ): Response<List<OrderStatusHistory>>
 
+    // Remote control: banners, notices and flags from the City Admin (no app update needed)
+    @POST("rest/v1/rpc/get_remote_config")
+    suspend fun getRemoteConfig(@Body body: Map<String, @JvmSuppressWildcards Any?>): Response<okhttp3.ResponseBody>
+
     // Price quotes for custom work
     @POST("rest/v1/rpc/vendor_quotes_list")
     suspend fun vendorQuotesList(@Body body: Map<String, @JvmSuppressWildcards Any?>): Response<okhttp3.ResponseBody>

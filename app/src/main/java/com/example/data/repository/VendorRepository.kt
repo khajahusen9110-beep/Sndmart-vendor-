@@ -1158,6 +1158,14 @@ class VendorRepository(
     }
 
     // 13. Cities for Self-Registration (Rule 6: Cached)
+    /** Raw JSON of the remote control data (banners, flags) for the vendor app in this city; null on any problem. */
+    suspend fun getRemoteConfigRaw(cityId: String?, versionCode: Int): String? = withContext(Dispatchers.IO) {
+        try {
+            val res = api.getRemoteConfig(mapOf("p_app" to "vendor", "p_city_id" to cityId, "p_version_code" to versionCode))
+            if (res.isSuccessful) res.body()?.string() else null
+        } catch (e: Exception) { null }
+    }
+
     private fun quoteError(raw: String, code: Int, fallback: String): String =
         runCatching { org.json.JSONObject(raw).optString("message") }.getOrNull()?.takeIf { it.isNotBlank() } ?: "$fallback (HTTP $code)"
 

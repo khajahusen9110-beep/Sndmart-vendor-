@@ -274,6 +274,7 @@ class MainActivity : ComponentActivity() {
         try {
             // Stop the order alarm whenever the user opens the app from a notification
             OrderAlarmService.stopAlarm(this)
+            if (intent?.getStringExtra("NAVIGATE_TO").equals("quotes", ignoreCase = true)) viewModel.requestOpenQuotes()
             val selectedOrderId = intent?.getStringExtra("SELECTED_ORDER_ID")
             if (!selectedOrderId.isNullOrBlank()) {
                 viewModel.navigateToOrders(selectedOrderId)
@@ -455,8 +456,10 @@ private fun MainVendorAppContent(
         }
     }
     var showingProfileScreen by remember { mutableStateOf(false) }
-    var showingQuotesScreen by remember { mutableStateOf(false) }
+    var showingQuotesScreen by remember { mutableStateOf(initialTargetTab.equals("quotes", ignoreCase = true)) }
     val quotesList by viewModel.quotes.collectAsState()
+    val openQuotesCount by viewModel.openQuotesRequest.collectAsState()
+    LaunchedEffect(openQuotesCount) { if (openQuotesCount > 0) showingQuotesScreen = true }
     val quotesError by viewModel.quotesError.collectAsState()
     var showingRegisterScreen by remember { mutableStateOf(false) }
     var showingForgotScreen by remember { mutableStateOf(false) }
@@ -551,6 +554,23 @@ private fun MainVendorAppContent(
 
         is AuthUiState.Authenticated -> {
             val vendor = state.vendor
+            // remote control (banners, notices, flags from the City Admin): load now, refresh about hourly
+            val remoteContext = androidx.compose.ui.platform.LocalContext.current
+            LaunchedEffect(vendor.id) {
+                com.example.remote.RemoteConfigStore.load(remoteContext)
+                while (true) { viewModel.refreshRemoteConfig(remoteContext, vendor.cityId); kotlinx.coroutines.delay(60 * 60_000L) }
+            }
+            LaunchedEffect(Unit) {
+                com.example.remote.RemoteActions.handler = { name ->
+                    when (name) {
+                        "quotes" -> showingQuotesScreen = true
+                        "orders" -> currentTab = VendorNavTab.ORDERS
+                        "earnings" -> currentTab = VendorNavTab.EARNINGS
+                        "menu" -> currentTab = VendorNavTab.MENU
+                        "home" -> currentTab = VendorNavTab.HOME
+                    }
+                }
+            }
             // shops: keep the count of waiting price requests fresh
             LaunchedEffect(vendor.id) {
                 if ((vendor.vendorType ?: "hotel") != "hotel") { while (true) { viewModel.refreshQuotes(); kotlinx.coroutines.delay(60_000) } }
