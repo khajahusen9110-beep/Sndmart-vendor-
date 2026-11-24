@@ -783,6 +783,11 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch { val r = repository.declineQuote(id, reason); if (r.isSuccess) refreshQuotes(); onDone(r.exceptionOrNull()?.message) }
     }
 
+    /** Refreshes the remote control data (banners, flags) for this vendor's city. */
+    suspend fun refreshRemoteConfig(context: android.content.Context, cityId: String?) {
+        com.example.remote.RemoteConfigStore.refresh(context, minGapMs = 30 * 60_000L) { repository.getRemoteConfigRaw(cityId, com.example.BuildConfig.VERSION_CODE) }
+    }
+
     private fun currentVendorId(): String? {
         return (_authUiState.value as? AuthUiState.Authenticated)?.vendor?.id
             ?: _profileState.value.vendor?.id

@@ -554,6 +554,23 @@ private fun MainVendorAppContent(
 
         is AuthUiState.Authenticated -> {
             val vendor = state.vendor
+            // remote control (banners, notices, flags from the City Admin): load now, refresh about hourly
+            val remoteContext = androidx.compose.ui.platform.LocalContext.current
+            LaunchedEffect(vendor.id) {
+                com.example.remote.RemoteConfigStore.load(remoteContext)
+                while (true) { viewModel.refreshRemoteConfig(remoteContext, vendor.cityId); kotlinx.coroutines.delay(60 * 60_000L) }
+            }
+            LaunchedEffect(Unit) {
+                com.example.remote.RemoteActions.handler = { name ->
+                    when (name) {
+                        "quotes" -> showingQuotesScreen = true
+                        "orders" -> currentTab = VendorNavTab.ORDERS
+                        "earnings" -> currentTab = VendorNavTab.EARNINGS
+                        "menu" -> currentTab = VendorNavTab.MENU
+                        "home" -> currentTab = VendorNavTab.HOME
+                    }
+                }
+            }
             // shops: keep the count of waiting price requests fresh
             LaunchedEffect(vendor.id) {
                 if ((vendor.vendorType ?: "hotel") != "hotel") { while (true) { viewModel.refreshQuotes(); kotlinx.coroutines.delay(60_000) } }
