@@ -149,7 +149,7 @@ interface SupabaseApi {
     // Many products in one request (bulk import); every row carries the same keys
     @POST("rest/v1/products")
     @Headers("Prefer: return=minimal")
-    suspend fun createProductsBulk(@Body rows: List<Map<String, @JvmSuppressWildcards Any?>>): Response<okhttp3.ResponseBody>
+    suspend fun createProductsBulk(@Body rows: List<@JvmSuppressWildcards Map<String, @JvmSuppressWildcards Any?>>): Response<okhttp3.ResponseBody>
 
     @POST("rest/v1/products")
     @Headers("Prefer: return=representation")
@@ -167,7 +167,7 @@ interface SupabaseApi {
     ): Response<List<ProductVariant>>
 
     @POST("rest/v1/product_variants")
-    suspend fun createProductVariants(@Body rows: List<Map<String, @JvmSuppressWildcards Any?>>): Response<okhttp3.ResponseBody>
+    suspend fun createProductVariants(@Body rows: List<@JvmSuppressWildcards Map<String, @JvmSuppressWildcards Any?>>): Response<okhttp3.ResponseBody>
 
     @PATCH("rest/v1/product_variants")
     suspend fun updateProductVariant(
