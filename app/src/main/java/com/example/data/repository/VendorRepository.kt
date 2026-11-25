@@ -1485,6 +1485,20 @@ class VendorRepository(
         uploadPublicImage("restaurant-images", vendorId, fileName, fileBytes, mimeType)
     }
 
+    /** Runs one upload up to 3 times when the network drops or stalls (each try is a fresh connection); HTTP errors are not retried. */
+    private suspend fun <T> withUploadRetry(block: suspend () -> retrofit2.Response<T>): retrofit2.Response<T> {
+        var last: java.io.IOException? = null
+        repeat(3) { attempt ->
+            try {
+                return block()
+            } catch (e: java.io.IOException) {
+                last = e
+                kotlinx.coroutines.delay(700L * (attempt + 1))
+            }
+        }
+        throw last ?: java.io.IOException("Upload failed")
+    }
+
     suspend fun uploadPublicImage(
         bucketName: String,
         vendorId: String,
@@ -1500,12 +1514,14 @@ class VendorRepository(
             val storedName = fileName.substringBeforeLast('.', fileName) + ".jpg"
             val relativePath = "$vendorId/$storedName"
             val requestBody = packed.bytes.toRequestBody("image/jpeg".toMediaTypeOrNull())
-            val response = api.uploadStorageObject(
-                bucket = bucketName,
-                path = relativePath,
-                fileBytes = requestBody,
-                contentType = "image/jpeg"
-            )
+            val response = withUploadRetry {
+                supabaseClient.storageApi.uploadStorageObject(
+                    bucket = bucketName,
+                    path = relativePath,
+                    fileBytes = requestBody,
+                    contentType = "image/jpeg"
+                )
+            }
             if (response.isSuccessful) {
                 val baseUrl = SupabaseClient.resolveBaseUrl()
                 val cleanBase = if (baseUrl.endsWith("/")) baseUrl else "$baseUrl/"
@@ -1542,16 +1558,25 @@ class VendorRepository(
                 return@withContext Resource.Error(err)
             }
 
-            val relativePath = "$effectiveUserId/$fileName"
-            android.util.Log.d("VendorRepository", "Uploading KYC document to storage: path=$relativePath, size=${fileBytes.size}, mime=$mimeType")
+            // A photo of a document is brought to about 350 KB first (camera photos are 2 to 6 MB and made registration very slow);
+            // a PDF or anything unreadable as a picture goes up as it is.
+            val packed = if (mimeType.startsWith("image/") || com.example.util.ImageCompressor.looksLikeImage(fileBytes))
+                com.example.util.ImageCompressor.compressDocument(fileBytes) else null
+            val sendBytes = packed?.bytes ?: fileBytes
+            val sendMime = if (packed != null) "image/jpeg" else mimeType
+            val sendName = if (packed != null) fileName.substringBeforeLast('.', fileName) + ".jpg" else fileName
+            val relativePath = "$effectiveUserId/$sendName"
+            android.util.Log.d("VendorRepository", "Uploading KYC document to storage: path=$relativePath, size=${sendBytes.size} (was ${fileBytes.size}), mime=$sendMime")
 
-            val requestBody = fileBytes.toRequestBody(mimeType.toMediaTypeOrNull())
-            val response = api.uploadKycDocument(
-                path = relativePath,
-                fileBytes = requestBody,
-                contentType = mimeType,
-                upsert = "true"
-            )
+            val requestBody = sendBytes.toRequestBody(sendMime.toMediaTypeOrNull())
+            val response = withUploadRetry {
+                supabaseClient.storageApi.uploadKycDocument(
+                    path = relativePath,
+                    fileBytes = requestBody,
+                    contentType = sendMime,
+                    upsert = "true"
+                )
+            }
             if (response.isSuccessful) {
                 // Return clean storage path within bucket (e.g. userId/food-license-12345.jpg)
                 val rawKey = response.body()?.key ?: relativePath

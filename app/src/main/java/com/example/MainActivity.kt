@@ -122,6 +122,9 @@ class MainActivity : ComponentActivity() {
         playUpdateManager = PlayUpdateManager(this)
         fullScreenPromptSkipped = readFullScreenSkipped()
         fullScreenEverGranted = readFullScreenEverGranted()
+        // "Hide" on the reminder strip lasts 3 days (it used to come back at every app start)
+        val hiddenAt = getSharedPreferences("sndmart_vendor_prefs", Context.MODE_PRIVATE).getLong("fullscreen_banner_hidden_at", 0L)
+        fullScreenBannerDismissed = System.currentTimeMillis() - hiddenAt < 3L * 24 * 60 * 60 * 1000
         isFullScreenPermissionRequired = shouldGateFullScreen()
         checkNotificationPermission()
         handleIntent(intent)
@@ -161,7 +164,10 @@ class MainActivity : ComponentActivity() {
                                     fontSize = 12.sp, color = androidx.compose.ui.graphics.Color(0xFFE65100), modifier = Modifier.weight(1f)
                                 )
                                 TextButton(onClick = { openFullScreenPermissionSettings() }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) { Text("Turn on", fontSize = 12.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold) }
-                                TextButton(onClick = { fullScreenBannerDismissed = true }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) { Text("Hide", fontSize = 12.sp) }
+                                TextButton(onClick = {
+                                    fullScreenBannerDismissed = true
+                                    getSharedPreferences("sndmart_vendor_prefs", Context.MODE_PRIVATE).edit().putLong("fullscreen_banner_hidden_at", System.currentTimeMillis()).apply()
+                                }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) { Text("Hide", fontSize = 12.sp) }
                             }
                         }
                     }
@@ -228,6 +234,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         viewModel.onAppStopped()
+        // The blocking permission screen is shown at most once: the moment the vendor leaves the app while it is up
+        // (tapping Allow opens the system settings), it counts as shown and never blocks again, even when this phone
+        // keeps reporting the permission as off. A small reminder strip is all that stays.
+        if (isFullScreenPermissionRequired) setFullScreenSkipped(true)
         super.onStop()
     }
 
