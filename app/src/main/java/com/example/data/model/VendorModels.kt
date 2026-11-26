@@ -205,8 +205,12 @@ data class OrderItem(
     val name: String? = null,
     // Shops: what the customer wrote / the photo they added for this made-to-order line
     val custom_note: String? = null,
-    val custom_photo_path: String? = null
+    val custom_photo_path: String? = null,
+    // 'active' or 'rejected' (the store said it cannot give this item)
+    val item_status: String? = null,
+    val reject_reason: String? = null
 ) {
+    val isRejected: Boolean get() = item_status == "rejected"
     val productName: String? get() = product_name ?: name
     val unitPrice: Double get() = unit_price ?: 0.0
     val totalPrice: Double get() = total_price ?: 0.0

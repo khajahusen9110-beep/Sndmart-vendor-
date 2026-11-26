@@ -1552,6 +1552,29 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
         _ordersState.update { it.copy(activeFilter = filter) }
     }
 
+    /** The store cannot give this item: the server updates the order total, the refund and tells the customer and the delivery partner. */
+    fun rejectOrderItem(itemId: String, reason: String?, onComplete: (Boolean, String?) -> Unit) {
+        if (_ordersState.value.isUpdating) return
+        _ordersState.update { it.copy(isUpdating = true, errorMessage = null) }
+        viewModelScope.launch {
+            when (val res = repository.rejectOrderItem(itemId, reason)) {
+                is Resource.Success -> {
+                    _ordersState.update { it.copy(isUpdating = false) }
+                    val cancelled = res.data.optBoolean("cancelled", false)
+                    if (cancelled) _ordersState.update { it.copy(selectedOrder = null) }
+                    loadOrders()
+                    loadDashboard()
+                    onComplete(true, if (cancelled) "All items were unavailable, so the order is cancelled" else null)
+                }
+                is Resource.Error -> {
+                    _ordersState.update { it.copy(isUpdating = false, errorMessage = res.message) }
+                    onComplete(false, res.message)
+                }
+                Resource.Loading -> {}
+            }
+        }
+    }
+
     /**
      * Vendor actions: "confirmed" -> "preparing" (Start Preparing) or "confirmed" -> "cancelled".
      * The update is applied only if the order is still in [fromStatus] on the server.

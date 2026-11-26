@@ -720,6 +720,18 @@ class VendorRepository(
         }
     }
 
+    /** Marks one item of an order as not available. Returns the server's answer (new total, whether the whole order was cancelled). */
+    suspend fun rejectOrderItem(itemId: String, reason: String?): Resource<org.json.JSONObject> = withContext(Dispatchers.IO) {
+        invalidateLiveData()
+        try {
+            val response = api.rejectOrderItem(mapOf("p_item_id" to itemId, "p_reason" to reason, "p_mark_unavailable" to true))
+            if (response.isSuccessful) Resource.Success(org.json.JSONObject(response.body()?.string().orEmpty().ifBlank { "{}" }))
+            else Resource.Error(extractErrorMessage(response, "Could not update the item"), response.code())
+        } catch (e: Exception) {
+            Resource.Error(e.message ?: "Network error")
+        }
+    }
+
     /**
      * Moves an order to [newStatus] only if it is still in [expectedCurrentStatus].
      * Order status history is written by a database trigger.

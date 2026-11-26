@@ -773,6 +773,7 @@ private fun MainVendorAppContent(
                                         onUpdateOrderStatus = { orderId, fromStatus, newStatus, onComplete ->
                                             viewModel.updateOrderStatus(orderId, fromStatus, newStatus, onComplete)
                                         },
+                                        onRejectItem = { itemId, reason, onComplete -> viewModel.rejectOrderItem(itemId, reason, onComplete) },
                                         onRefresh = { viewModel.refreshAll() },
                                         onLoadMore = { viewModel.loadMoreOrders() },
                                         onSearchQueryChange = { viewModel.setOrdersSearchQuery(it) }
