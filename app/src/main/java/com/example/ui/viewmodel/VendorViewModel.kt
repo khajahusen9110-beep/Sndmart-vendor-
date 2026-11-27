@@ -1082,6 +1082,32 @@ class VendorViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    /** Uploads the shop logo; the customer app shows it on the shop's card and page. */
+    fun uploadStoreLogo(fileName: String, fileBytes: ByteArray, mimeType: String, onComplete: (Boolean, String?, String?) -> Unit) {
+        val vendorId = currentVendorId()
+        if (vendorId == null) { onComplete(false, null, "Vendor session missing. Please log in."); return }
+        viewModelScope.launch {
+            when (val res = repository.uploadStoreLogo(vendorId, fileName, fileBytes, mimeType)) {
+                is Resource.Success -> {
+                    _profileState.update { st -> st.copy(vendor = st.vendor?.copy(logoUrl = res.data)) }
+                    onComplete(true, res.data, null)
+                }
+                is Resource.Error -> onComplete(false, null, res.message)
+                Resource.Loading -> {}
+            }
+        }
+    }
+
+    fun removeStoreLogo(onComplete: (Boolean, String?) -> Unit) {
+        viewModelScope.launch {
+            when (val res = repository.clearStoreLogo()) {
+                is Resource.Success -> { _profileState.update { st -> st.copy(vendor = st.vendor?.copy(logoUrl = null)) }; onComplete(true, null) }
+                is Resource.Error -> onComplete(false, res.message)
+                Resource.Loading -> {}
+            }
+        }
+    }
+
     fun addCategory(name: String, imageUrl: String, onComplete: (Boolean, String?) -> Unit) {
         val vendorId = currentVendorId()
         if (vendorId == null) {

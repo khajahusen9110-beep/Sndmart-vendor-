@@ -606,6 +606,10 @@ private fun MainVendorAppContent(
                     onUploadBanner = { fileName, fileBytes, mimeType, onComplete ->
                         viewModel.uploadStoreBanner(fileName, fileBytes, mimeType, onComplete)
                     },
+                    onUploadLogo = { fileName, fileBytes, mimeType, onComplete ->
+                        viewModel.uploadStoreLogo(fileName, fileBytes, mimeType, onComplete)
+                    },
+                    onRemoveLogo = { onComplete -> viewModel.removeStoreLogo(onComplete) },
                     onAddOperatingHour = { start, end, active, closed, day, onComplete ->
                         viewModel.addOperatingHour(start, end, active, closed, day, onComplete)
                     },
