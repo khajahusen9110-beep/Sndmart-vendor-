@@ -51,6 +51,8 @@ fun StoreProfileScreen(
     state: ProfileUiState,
     onSaveProfile: (name: String, ownerName: String?, phone: String?, address: String?, lat: Double?, lng: Double?, openTime: String?, closeTime: String?, bannerUrl: String?, cityId: String?, onComplete: (Boolean, String?) -> Unit) -> Unit,
     onUploadBanner: (fileName: String, fileBytes: ByteArray, mimeType: String, onComplete: (Boolean, String?, String?) -> Unit) -> Unit,
+    onUploadLogo: (fileName: String, fileBytes: ByteArray, mimeType: String, onComplete: (Boolean, String?, String?) -> Unit) -> Unit = { _, _, _, done -> done(false, null, "Not available") },
+    onRemoveLogo: (onComplete: (Boolean, String?) -> Unit) -> Unit = { done -> done(false, "Not available") },
     onAddOperatingHour: (startTime: String, endTime: String, isActive: Boolean, isClosed: Boolean, dayOfWeek: String?, onComplete: (Boolean, String?) -> Unit) -> Unit,
     onUpdateOperatingHour: (id: String, startTime: String, endTime: String, isActive: Boolean, isClosed: Boolean, dayOfWeek: String?, onComplete: (Boolean, String?) -> Unit) -> Unit,
     onToggleOperatingHourActive: (OperatingHour) -> Unit,
@@ -245,6 +247,38 @@ fun StoreProfileScreen(
                             onError = { err ->
                                 bannerUploadError = err
                             }
+                        )
+
+                        // The shop's logo: a small square picture on its card and page (saved at once)
+                        Text("Store Logo", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Slate900, modifier = Modifier.padding(top = 8.dp))
+                        Text("A square logo of your shop. Customers see it on your shop card and your shop page.", style = MaterialTheme.typography.bodySmall, color = Slate500)
+                        var selectedLogoPhoto by remember { mutableStateOf<SelectedImageFile?>(null) }
+                        var isUploadingLogo by remember { mutableStateOf(false) }
+                        var logoError by remember { mutableStateOf<String?>(null) }
+                        var logoUrl by remember(vendor) { mutableStateOf(vendor.logoUrl ?: "") }
+                        ImageUploadDropzone(
+                            label = "Store Logo",
+                            isRequired = false,
+                            selectedImage = selectedLogoPhoto,
+                            existingImageUrl = logoUrl.ifBlank { null },
+                            isUploading = isUploadingLogo,
+                            uploadProgressText = "Uploading logo...",
+                            errorMessage = logoError,
+                            onImageSelected = { file ->
+                                selectedLogoPhoto = file
+                                logoError = null
+                                isUploadingLogo = true
+                                val fileName = "logo-${System.currentTimeMillis()}.${file.extension.ifBlank { "jpg" }}"
+                                onUploadLogo(fileName, file.bytes, file.mimeType) { success, url, err ->
+                                    isUploadingLogo = false
+                                    if (success && url != null) { logoUrl = url; selectedLogoPhoto = null } else logoError = err ?: "Logo upload failed. Please try again."
+                                }
+                            },
+                            onImageRemoved = {
+                                selectedLogoPhoto = null
+                                onRemoveLogo { ok, err -> if (ok) logoUrl = "" else logoError = err ?: "Could not remove the logo" }
+                            },
+                            onError = { err -> logoError = err }
                         )
                     }
                 }

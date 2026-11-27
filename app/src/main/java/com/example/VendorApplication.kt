@@ -35,6 +35,8 @@ class VendorApplication : Application(), ImageLoaderFactory {
 
     override fun onCreate() {
         super.onCreate()
+        // Crash reports from real phones (not from debug builds); the report carries no customer data
+        try { com.google.firebase.crashlytics.FirebaseCrashlytics.getInstance().setCrashlyticsCollectionEnabled(!BuildConfig.DEBUG) } catch (e: Exception) { Log.w("VendorApp", "Crashlytics not started: ${e.message}") }
         // Initialize notification channels at application startup
         NotificationHelper.createNotificationChannels(this)
 

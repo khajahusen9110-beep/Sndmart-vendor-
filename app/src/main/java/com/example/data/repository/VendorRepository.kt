@@ -1497,6 +1497,25 @@ class VendorRepository(
         uploadPublicImage("restaurant-images", vendorId, fileName, fileBytes, mimeType)
     }
 
+    /** Uploads the shop logo and saves it on the shop; an empty [fileBytes] list is not used (see [clearStoreLogo]). */
+    suspend fun uploadStoreLogo(vendorId: String, fileName: String, fileBytes: ByteArray, mimeType: String): Resource<String> = withContext(Dispatchers.IO) {
+        when (val up = uploadPublicImage("restaurant-images", vendorId, fileName, fileBytes, mimeType)) {
+            is Resource.Success -> try {
+                val res = api.setStoreLogo(mapOf("p_url" to up.data))
+                if (res.isSuccessful) { invalidateLiveData(); Resource.Success(up.data) } else Resource.Error(extractErrorMessage(res, "Could not save the logo"), res.code())
+            } catch (e: Exception) { Resource.Error(e.message ?: "Network error") }
+            is Resource.Error -> up
+            Resource.Loading -> Resource.Loading
+        }
+    }
+
+    suspend fun clearStoreLogo(): Resource<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val res = api.setStoreLogo(mapOf("p_url" to ""))
+            if (res.isSuccessful) { invalidateLiveData(); Resource.Success(Unit) } else Resource.Error(extractErrorMessage(res, "Could not remove the logo"), res.code())
+        } catch (e: Exception) { Resource.Error(e.message ?: "Network error") }
+    }
+
     /** Runs one upload up to 3 times when the network drops or stalls (each try is a fresh connection); HTTP errors are not retried. */
     private suspend fun <T> withUploadRetry(block: suspend () -> retrofit2.Response<T>): retrofit2.Response<T> {
         var last: java.io.IOException? = null

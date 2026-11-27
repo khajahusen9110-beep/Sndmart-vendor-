@@ -227,6 +227,10 @@ interface SupabaseApi {
     ): Response<List<OrderStatusHistory>>
 
     // The store cannot give one item of an order: the total, refund and everyone's screen follow
+    // The shop's own logo (shown on its card and page in the customer app)
+    @POST("rest/v1/rpc/vendor_set_logo")
+    suspend fun setStoreLogo(@Body body: Map<String, @JvmSuppressWildcards Any?>): Response<okhttp3.ResponseBody>
+
     @POST("rest/v1/rpc/vendor_reject_order_item")
     suspend fun rejectOrderItem(@Body body: Map<String, @JvmSuppressWildcards Any?>): Response<okhttp3.ResponseBody>
 

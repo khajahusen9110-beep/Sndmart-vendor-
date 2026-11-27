@@ -403,6 +403,8 @@ fun OrdersScreen(
                                 }
                             }
 
+                            ResponseTimer(order, Modifier.padding(vertical = 6.dp))
+
                             val foodSubtotal = order.subtotal
                                 ?: order.orderItems?.sumOf { it.totalPrice.takeIf { p -> p > 0 } ?: (it.unitPrice * (it.quantity ?: 1.0)) }
                                 ?: order.totalAmount
@@ -713,6 +715,7 @@ fun OrdersScreen(
                     modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
+                    item { ResponseTimer(order) }
                     // Customer info card
                     item {
                         Surface(
