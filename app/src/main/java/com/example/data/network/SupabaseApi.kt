@@ -193,7 +193,7 @@ interface SupabaseApi {
     suspend fun getOrders(
         @Query("vendor_id") vendorIdFilter: String,
         @Query("status") statusFilter: String = "in.(confirmed,preparing,ready,out_for_delivery,delivered,cancelled,rejected)",
-        @Query("select") select: String = "id,order_number,status,subtotal,discount_amount,delivery_fee,handling_fee,total_amount,commission_amount,vendor_amount,notes,cooking_instructions,payment_status,payment_method,created_at,scheduled_for,scheduled_until,prepare_from,customer_id,address_id,order_items(id,product_name,quantity,unit_price,total_price,custom_note,custom_photo_path),address:customer_addresses!orders_address_id_fkey(address_line,landmark,recipient_name,phone)",
+        @Query("select") select: String = "id,order_number,status,subtotal,discount_amount,delivery_fee,handling_fee,total_amount,commission_amount,vendor_amount,notes,cooking_instructions,payment_status,payment_method,created_at,scheduled_for,scheduled_until,prepare_from,customer_id,address_id,order_items(id,product_name,quantity,unit_price,total_price,custom_note,custom_photo_path,item_status,reject_reason),address:customer_addresses!orders_address_id_fkey(address_line,landmark,recipient_name,phone)",
         @Query("order") order: String = "created_at.desc,id.desc",
         @Query("limit") limit: Int? = 20,
         @Query("offset") offset: Int? = 0
@@ -225,6 +225,10 @@ interface SupabaseApi {
         @Query("select") select: String = "status,created_at",
         @Query("order") order: String = "created_at.asc"
     ): Response<List<OrderStatusHistory>>
+
+    // The store cannot give one item of an order: the total, refund and everyone's screen follow
+    @POST("rest/v1/rpc/vendor_reject_order_item")
+    suspend fun rejectOrderItem(@Body body: Map<String, @JvmSuppressWildcards Any?>): Response<okhttp3.ResponseBody>
 
     // Remote control: banners, notices and flags from the City Admin (no app update needed)
     @POST("rest/v1/rpc/get_remote_config")

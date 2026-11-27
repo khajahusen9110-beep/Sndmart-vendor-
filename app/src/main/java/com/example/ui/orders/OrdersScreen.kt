@@ -67,6 +67,7 @@ fun OrdersScreen(
     onFilterChange: (String) -> Unit,
     onSelectOrder: (Order?) -> Unit,
     onUpdateOrderStatus: (orderId: String, fromStatus: String, newStatus: String, onComplete: (Boolean, String?) -> Unit) -> Unit,
+    onRejectItem: (itemId: String, reason: String?, onComplete: (Boolean, String?) -> Unit) -> Unit = { _, _, _ -> },
     onRefresh: () -> Unit,
     onLoadMore: () -> Unit = {},
     onSearchQueryChange: (String) -> Unit = {},
@@ -835,13 +836,38 @@ fun OrdersScreen(
                                     text = "${item.intQuantity}x ${item.displayName}",
                                     modifier = Modifier.weight(1f),
                                     fontWeight = FontWeight.Medium,
-                                    color = Slate900
+                                    color = if (item.isRejected) Slate500 else Slate900,
+                                    textDecoration = if (item.isRejected) androidx.compose.ui.text.style.TextDecoration.LineThrough else null
                                 )
                                 val itemTotal = item.totalPrice.takeIf { it > 0 } ?: (item.unitPrice * (item.quantity ?: 1.0))
                                 Text(
                                     text = CurrencyFormatter.format(itemTotal),
                                     fontWeight = FontWeight.Bold,
-                                    color = Slate900
+                                    color = if (item.isRejected) Slate500 else Slate900,
+                                    textDecoration = if (item.isRejected) androidx.compose.ui.text.style.TextDecoration.LineThrough else null
+                                )
+                            }
+                            // The store cannot give this item: one tap, the customer and the delivery partner are told and the total follows
+                            if (item.isRejected) {
+                                Text("Not available", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFFB91C1C))
+                            } else if (order.status?.lowercase() in setOf("pending", "confirmed", "preparing") && item.id.isNotBlank()) {
+                                var askReject by remember(item.id) { mutableStateOf(false) }
+                                TextButton(onClick = { askReject = true }, enabled = !state.isUpdating, contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)) {
+                                    Text("Not available", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFFB91C1C))
+                                }
+                                if (askReject) AlertDialog(
+                                    onDismissRequest = { askReject = false },
+                                    title = { Text("${item.displayName} is not available?") },
+                                    text = { Text("The customer and the delivery partner are told, the item is removed from the bill and any payment for it goes back to the customer. The item is also switched off in your menu.") },
+                                    confirmButton = {
+                                        TextButton(onClick = {
+                                            askReject = false
+                                            onRejectItem(item.id, "Not available") { ok, msg ->
+                                                Toast.makeText(context, if (ok) (msg ?: "Item removed, customer informed") else (msg ?: "Could not update"), Toast.LENGTH_LONG).show()
+                                            }
+                                        }) { Text("Yes, remove it", color = Color(0xFFB91C1C), fontWeight = FontWeight.Bold) }
+                                    },
+                                    dismissButton = { TextButton(onClick = { askReject = false }) { Text("Cancel") } }
                                 )
                             }
                             // Made-to-order line: what the customer wants written + their photo
